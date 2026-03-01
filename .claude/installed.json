@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "installedAt": "2026-01-07T23:46:52.327Z",
+  "updatedAt": "2026-01-08T00:26:35.689Z",
+  "plugins": [
+    {
+      "name": "dev-browser",
+      "version": "1.0.1",
+      "sourcePath": "C:\\Users\\jayte\\Documents\\dev\\dev-browser",
+      "installedAt": "2026-01-07T23:46:52.327Z",
+      "components": {
+        "agents": 0,
+        "commands": 0,
+        "skills": 1,
+        "mcpServers": 0,
+        "variants": 0
+      }
+    },
+    {
+      "name": "compound-engineering",
+      "version": "2.24.0",
+      "sourcePath": "C:\\Users\\jayte\\Documents\\dev\\compound-engineering-plugin",
+      "installedAt": "2026-01-07T23:46:55.826Z",
+      "components": {
+        "agents": 27,
+        "commands": 21,
+        "skills": 14,
+        "mcpServers": 2,
+        "variants": 0
+      }
+    },
+    {
+      "name": "daily-carry",
+      "version": "1.0.0",
+      "sourcePath": "C:\\Users\\jayte\\Documents\\dev\\agent-skills",
+      "installedAt": "2026-01-08T00:24:55.870Z",
+      "components": {
+        "agents": 0,
+        "commands": 0,
+        "skills": 2,
+        "mcpServers": 0,
+        "variants": 0
+      }
+    }
+  ],
+  "variant": {
+    "name": "Generic",
+    "sourcePath": "C:\\Users\\jayte\\Documents\\dev\\agent-skills\\variants\\Generic",
+    "checksum": "0083c8b6279cb5a46967d2f17bb1444d50375b90b3cb8eb9d21df91a133541fb",
+    "installedAt": "2026-01-08T00:26:35.689Z"
+  }
+}
