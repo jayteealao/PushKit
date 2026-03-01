@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
 
 	"github.com/pushkit/backend/internal/config"
@@ -79,6 +81,30 @@ func (c *Client) GenerateDownloadURL(ctx context.Context, s3Key, originalFilenam
 		return "", fmt.Errorf("presign GET: %w", err)
 	}
 	return req.URL, nil
+}
+
+// HeadObject checks whether an S3 object exists. Returns (true, nil) if it exists,
+// (false, nil) if it does not, or (false, err) on unexpected errors.
+func (c *Client) HeadObject(ctx context.Context, s3Key string) (bool, error) {
+	_, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(s3Key),
+	})
+	if err != nil {
+		// Check for NotFound-style errors.
+		var nsk *types.NotFound
+		if errors.As(err, &nsk) {
+			return false, nil
+		}
+		// aws-sdk-go-v2 may return a smithy OperationError wrapping a 404;
+		// also check for the generic "NotFound" or "NoSuchKey" in the error string
+		// as a fallback for S3-compatible backends (MinIO, R2).
+		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		return false, fmt.Errorf("head object %s: %w", s3Key, err)
+	}
+	return true, nil
 }
 
 func (c *Client) DeleteObject(ctx context.Context, s3Key string) error {

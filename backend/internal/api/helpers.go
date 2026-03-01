@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/pushkit/backend/internal/models"
@@ -11,19 +12,24 @@ import (
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("failed to encode JSON response", "err", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, models.ErrorResponse{Error: msg})
 }
 
-func decodeJSON(r *http.Request, v any) error {
+// maxRequestBody is the maximum allowed request body size (1 MB).
+const maxRequestBody = 1 << 20
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	if r.Body == nil {
 		return fmt.Errorf("empty request body")
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}

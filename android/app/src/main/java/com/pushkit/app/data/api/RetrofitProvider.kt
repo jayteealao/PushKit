@@ -1,6 +1,7 @@
 package com.pushkit.app.data.api
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import com.pushkit.app.BuildConfig
 import com.pushkit.app.data.CredentialStore
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,7 +25,8 @@ object RetrofitProvider {
         val client = OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(credentialStore))
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                        else HttpLoggingInterceptor.Level.BASIC
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

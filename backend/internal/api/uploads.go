@@ -32,7 +32,7 @@ func (h *UploadHandler) initUpload(w http.ResponseWriter, r *http.Request) {
 	userID := auth.GetUserID(r.Context())
 
 	var req models.UploadInitRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -47,6 +47,10 @@ func (h *UploadHandler) initUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ContentType == "" {
 		req.ContentType = "application/octet-stream"
+	}
+	if req.SizeBytes != nil && *req.SizeBytes < 0 {
+		writeError(w, http.StatusBadRequest, "sizeBytes must be non-negative")
+		return
 	}
 
 	fileID := uuid.New().String()
@@ -94,13 +98,17 @@ func (h *UploadHandler) completeUpload(w http.ResponseWriter, r *http.Request) {
 	userID := auth.GetUserID(r.Context())
 
 	var req models.UploadCompleteRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.FileID == "" {
 		writeError(w, http.StatusBadRequest, "fileId is required")
+		return
+	}
+	if req.SizeBytes != nil && *req.SizeBytes < 0 {
+		writeError(w, http.StatusBadRequest, "sizeBytes must be non-negative")
 		return
 	}
 
@@ -117,6 +125,18 @@ func (h *UploadHandler) completeUpload(w http.ResponseWriter, r *http.Request) {
 
 	if record.Status != models.StatusInitiated {
 		writeError(w, http.StatusConflict, "upload already completed or failed")
+		return
+	}
+
+	// Verify the S3 object actually exists before marking as uploaded.
+	exists, err := h.S3.HeadObject(r.Context(), record.S3Key)
+	if err != nil {
+		slog.Error("head object check failed", "err", err, "user_id", userID, "file_id", req.FileID, "s3_key", record.S3Key)
+		writeError(w, http.StatusBadGateway, "failed to verify upload in S3; retry later")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusConflict, "object not found in S3; upload may not have completed")
 		return
 	}
 

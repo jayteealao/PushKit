@@ -89,6 +89,15 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init upload: %w", err)
 	}
 
+	fmt.Fprintf(os.Stderr, "File ID: %s\n", initResp.FileID)
+
+	// Use Content-Type from the backend's requiredHeaders (which matches the
+	// presigned URL signature) rather than the locally-detected value.
+	putContentType := contentType
+	if ct, ok := initResp.RequiredHeaders["Content-Type"]; ok && ct != "" {
+		putContentType = ct
+	}
+
 	fmt.Fprintf(os.Stderr, "Uploading to S3...\n")
 
 	f, err := os.Open(filePath)
@@ -99,7 +108,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 
 	pr := progress.NewReader(f, size)
 
-	if err := c.PutToPresignedURL(ctx, initResp.PresignedPutURL, pr, contentType, size); err != nil {
+	if err := c.PutToPresignedURL(ctx, initResp.PresignedPutURL, pr, putContentType, size); err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
 	pr.Finish()
