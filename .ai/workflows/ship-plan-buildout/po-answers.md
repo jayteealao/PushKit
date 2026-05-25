@@ -112,3 +112,22 @@ Two rounds of discovery questions (7 total) covering implementation choices the 
 - **Hook auto-install:** `package.json` `prepare` script runs `lefthook install` on `npm i`. Documented in README so contributors know to `npm install` after clone.
 - **Go version:** Pin a single Go 1.24 across both Go jobs. CLI's `go.mod` declares 1.22.0; Go 1.24 compiles it without issue. Note `cli/go.mod` alignment to 1.24 as a future tidy-up (out of scope for this slice).
 
+---
+
+## Stage 4 — Plan: nsis-installer (2026-05-25T23:33:45Z)
+
+Two rounds of discovery (8 questions total) on implementation decisions the shape and slice left implicit. Web research surfaced one material security finding (NSIS 3.10 has CVE-2025-43715, CVSS 8.1, SYSTEM privilege escalation) and one community-canonical pattern (SimpleSC plugin for reliable service stop-with-file-release-wait on upgrade).
+
+### Round 1 — Strategy
+
+- **NSIS version:** Upgrade to **3.12** (CI + local). NSIS 3.10 has CVE-2025-43715 (SYSTEM privilege escalation, fixed in 3.11) plus a second elevation fix in 3.12 (2026-04-19). For a service installer running as SYSTEM the residual risk is non-trivial. CI step installs 3.12 via marketplace action; local install via the official .exe installer. This adjusts shape's freshness-research line that said "rely on pre-installed 3.10 on windows-2022" — that assumption is no longer safe. Touches `release-orchestration` slice's CI scope (one extra install step).
+- **Service plugin:** **Vendor `SimpleSC.dll` (Unicode 1.30)** in `backend/installer/plugins/`. Raw `nsExec::Exec 'sc.exe ...'` is unsafe for upgrade paths — `sc.exe` returns as soon as the SCM acknowledges the stop request, not when the service process has exited and released file handles. `SimpleSC::StopService "name" 1 30` polls the SCM state until SERVICE_STOPPED with a 30-second timeout. License MPL/LGPL; ~400 KB; community-canonical for service installers. Plugin DLL is vendored (tracked in git) under `backend/installer/plugins/`.
+- **Output path:** `backend/installer/pushkit-server-setup.exe`. Co-located with `pushkit.nsi`; `OutFile` uses the default behavior (relative to `.nsi` file). CI's `release-orchestration` slice copies the artifact from this path. Avoids OutFile path manipulation; simpler local iteration.
+- **Size NFR:** `SetCompressor lzma` and accept the resulting size. The Go binary alone is 27.2 MB; LZMA typically gets Go PE binaries 30–40% smaller, so the installer likely lands well below 25 MB. If post-compression still exceeds 25 MB after first build, the plan revisits and raises the NFR in handoff. Compile time penalty is small (~5–10 s, negligible vs CI total wall time).
+
+### Round 2 — Behavior
+
+- **Non-admin `/S` behavior:** **Fail loudly.** `.onInit` checks `UserInfo::GetAccountType`; if not `Admin`, `MessageBox MB_ICONSTOP /SD IDOK` then `Quit` (non-zero exit). Belt-and-suspenders alongside `RequestExecutionLevel admin`; protects against `EnableLua=0` silent-failure scenario.
+- **Service component default:** **Default-checked.** Diverges from slice spec line 48 ("default unchecked") — the spec is being intentionally updated based on web-research finding that the service IS the product and silent installs should auto-register. **Consequence:** silent `/S` install now registers the service. This conflicts with slice AC3 ("silent skips service component"). The plan's `## Blockers` section flags the AC contradiction and recommends the slice doc be updated alongside this plan landing.
+- **Install directory:** **Pinned to `$PROGRAMFILES64\PushKit`.** No `MUI_PAGE_DIRECTORY`; install path is hardcoded. Shape's smoke-test AC asserts `%ProgramFiles%\PushKit\pushkit-server.exe` literally; allowing user-chosen paths introduces space-handling edge cases the smoke-test won't catch.
+- **Local binary input:** **README documents `go build` step.** `backend/installer/README.md` instructs `go build -o backend/pushkit-server.exe ./backend/cmd/server` (or for size: `go build -ldflags="-s -w" ...`) before invoking `makensis`. The untracked `backend/pushkit-server.exe` already on the maintainer's disk works for immediate iteration, but the documented path makes fresh-clone reproducibility cheap. NSIS script reads from a path relative to itself; the plan implementation specifies this exact relative path.
