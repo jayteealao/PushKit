@@ -1,0 +1,47 @@
+---
+schema: sdlc/v1
+type: implement-index
+slug: ship-plan-buildout
+status: in-progress
+stage-number: 5
+created-at: "2026-05-25T11:54:43Z"
+updated-at: "2026-05-25T11:54:43Z"
+slices-implemented: 1
+slices-total: 5
+metric-total-files-changed: 7
+metric-total-lines-added: 511
+metric-total-lines-removed: 0
+tags:
+  - ci-cd
+  - lefthook
+  - commitlint
+  - github-actions
+refs:
+  index: 00-index.md
+  plan-index: 04-plan.md
+next-command: wf-verify
+next-invocation: "/wf verify ship-plan-buildout commit-hygiene"
+---
+
+# Implement Index
+
+## Slices
+
+| Slice | Status | Artifact |
+|-------|--------|----------|
+| commit-hygiene | complete | [05-implement-commit-hygiene.md](05-implement-commit-hygiene.md) |
+| backend-version | not-started | — |
+| nsis-installer | not-started | — |
+| android-versioning | not-started | — |
+| release-orchestration | not-started | — |
+
+## Cross-Slice Integration Notes
+
+- `README.md` is a shared file. `commit-hygiene` added `## Development setup`. Sibling slices (`backend-version`, `nsis-installer`, `release-orchestration`) will add their own README sections (`## Backend installer`, `## Releasing`, shields.io badge). Each slice is responsible for its own section; no coordination needed until `release-orchestration` adds the badge at the top.
+- `.github/workflows/ci.yml` (added by `commit-hygiene`) and `.github/workflows/release.yml` (modified by `release-orchestration`) are separate files — no conflict.
+- `android/app/build.gradle.kts` will be touched by `android-versioning` slice. `commit-hygiene` does not touch it.
+
+## Recommended Next Stage
+
+- **Option A (default):** `/wf verify ship-plan-buildout commit-hygiene` — verify the commit-hygiene slice before proceeding to the next slice.
+- **Option B:** `/wf plan ship-plan-buildout nsis-installer` — plan the next slice in parallel while the PR is in review.
