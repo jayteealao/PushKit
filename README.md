@@ -119,6 +119,24 @@ android/           Kotlin + Jetpack Compose
   app/             Android app module
 ```
 
+## Development setup
+
+**Prerequisites:** Node ≥ 20, Go ≥ 1.22, Java 17.
+
+**One-time setup after cloning:**
+
+```bash
+npm install   # installs commitlint + lefthook; auto-runs `lefthook install`
+```
+
+This wires a `commit-msg` hook that enforces [Conventional Commits](https://www.conventionalcommits.org/). Every commit must follow the pattern `type(scope): description`.
+
+**Scope vocabulary:** `backend`, `cli`, `android`, `ci`, `docs`, `deps`, `installer`, `release`
+
+Example: `feat(cli): add --dry-run flag` or `fix(backend): handle empty file list`.
+
+Using `--no-verify` bypasses the local hook but the `commitlint-backstop` CI job will catch it on the PR.
+
 ## Testing
 
 ```bash
