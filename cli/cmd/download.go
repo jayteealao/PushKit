@@ -16,8 +16,30 @@ import (
 var downloadCmd = &cobra.Command{
 	Use:   "download <fileId>",
 	Short: "Download a file",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDownload,
+	Long: `Download a file by its ID.
+
+The download flow:
+  1. Request a presigned GET URL from the API
+  2. Stream the file from S3 to a local file
+
+The output filename defaults to the original filename (from Content-Disposition)
+or the file ID if unavailable. Use --out to specify a custom path.
+
+JSON output (--json):
+  On success, prints a JSON object to stdout:
+    {"fileId":"...","filename":"...","path":"/abs/path","sizeBytes":1234}
+  On failure, prints {"error":"message"} to stderr and exits non-zero.
+  Progress bars and status messages are suppressed.`,
+	Example: `  # Download a file
+  pushkit download abc123
+
+  # Download to a specific path, overwriting if exists
+  pushkit download abc123 --out ./local-copy.pdf --force
+
+  # Download with JSON output (for scripts/agents)
+  pushkit download abc123 --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDownload,
 }
 
 var (
@@ -41,7 +63,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stderr, "Getting download URL...\n")
+	logStderr("Getting download URL...\n")
 	resp, err := c.GetDownloadURL(ctx, fileID)
 	if err != nil {
 		return fmt.Errorf("get download URL: %w", err)
@@ -88,10 +110,17 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	}
 
 	size := httpResp.ContentLength
-	pr := progress.NewReader(httpResp.Body, size)
 
-	fmt.Fprintf(os.Stderr, "Downloading...\n")
-	n, err := io.Copy(f, pr)
+	// In JSON mode, skip the progress bar — read directly from the response.
+	var body io.Reader = httpResp.Body
+	var pr *progress.Reader
+	if !flagJSON {
+		pr = progress.NewReader(httpResp.Body, size)
+		body = pr
+	}
+
+	logStderr("Downloading...\n")
+	n, err := io.Copy(f, body)
 	if closeErr := f.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
@@ -99,7 +128,23 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		os.Remove(outPath) // Clean up partial file.
 		return fmt.Errorf("download failed: %w", err)
 	}
-	pr.Finish()
+	if pr != nil {
+		pr.Finish()
+	}
+
+	if flagJSON {
+		return outputJSON(struct {
+			FileID    string `json:"fileId"`
+			Filename  string `json:"filename"`
+			Path      string `json:"path"`
+			SizeBytes int64  `json:"sizeBytes"`
+		}{
+			FileID:    fileID,
+			Filename:  filepath.Base(outPath),
+			Path:      outPath,
+			SizeBytes: n,
+		})
+	}
 
 	fmt.Printf("Downloaded %s (%s) to %s\n",
 		filepath.Base(outPath), progress.FormatBytes(n), outPath)

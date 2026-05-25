@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build wheels
+        run: |
+          pip install go-to-wheel
+          go-to-wheel ./cli \
+            --name pushkit \
+            --version ${{ steps.version.outputs.VERSION }} \
+            --set-version-var main.Version \
+            --entry-point pushkit \
+            --description "PushKit CLI — upload and manage files via an S3-backed API" \
+            --url "https://github.com/pushkit/cli" \
+            --license MIT \
+            --output-dir dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

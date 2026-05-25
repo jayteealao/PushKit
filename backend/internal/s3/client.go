@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/google/uuid"
 
 	"github.com/pushkit/backend/internal/config"
@@ -42,7 +44,39 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	if cfg.S3EndpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(cfg.S3EndpointURL)
-			o.UsePathStyle = true // Required for MinIO/LocalStack.
+			o.UsePathStyle = true // Required for MinIO/GCS/R2.
+			// Disable automatic checksums — S3-compatible services (GCS, MinIO, R2)
+			// don't support the x-amz-checksum-* headers that AWS SDK v2 adds by
+			// default, which causes SignatureDoesNotMatch errors.
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+			// Strip headers that break S3-compatible signing before they're
+			// included in the SigV4 canonical request:
+			// - Amz-Sdk-Invocation-Id / Amz-Sdk-Request: AWS SDK telemetry
+			//   headers unknown to GCS/MinIO.
+			// - Accept-Encoding: GCS's front-end (GFE) appends ",gzip(gfe)"
+			//   to this header, changing its value after signing.
+			o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
+				// Insert before Signing for normal API calls. The presign
+				// client has no "Signing" step so we silently skip there.
+				err := stack.Finalize.Insert(
+					middleware.FinalizeMiddlewareFunc("StripSDKHeaders",
+						func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+							if req, ok := in.Request.(*smithyhttp.Request); ok {
+								req.Header.Del("Amz-Sdk-Invocation-Id")
+								req.Header.Del("Amz-Sdk-Request")
+								req.Header.Del("Accept-Encoding")
+							}
+							return next.HandleFinalize(ctx, in)
+						},
+					),
+					"Signing", middleware.Before,
+				)
+				if err != nil && strings.Contains(err.Error(), "not found") {
+					return nil // presign pipeline — headers not needed
+				}
+				return err
+			})
 		})
 	}
 

@@ -36,7 +36,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,6 +81,12 @@ fun FileListScreen(
             TopAppBar(
                 title = { Text("PushKit") },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.refresh() },
+                        enabled = !state.isRefreshing
+                    ) {
+                        Icon(Icons.Default.Refresh, "Refresh")
+                    }
                     SortButton(
                         currentSort = state.sortField,
                         onSortSelected = { viewModel.setSort(it) }
@@ -103,11 +109,7 @@ fun FileListScreen(
                 onQueryChange = { viewModel.search(it) }
             )
 
-            PullToRefreshBox(
-                isRefreshing = state.isRefreshing,
-                onRefresh = { viewModel.refresh() },
-                modifier = Modifier.fillMaxSize()
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (state.files.isEmpty() && !state.isLoading && !state.isRefreshing) {
                     EmptyState()
                 } else {
