@@ -7,6 +7,7 @@
         android:name=".PushKitApp"
         android:allowBackup="true"
         android:label="PushKit"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.PushKit">
 

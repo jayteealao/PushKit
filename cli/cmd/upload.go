@@ -20,8 +20,33 @@ import (
 var uploadCmd = &cobra.Command{
 	Use:   "upload <file>",
 	Short: "Upload a file to S3",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runUpload,
+	Long: `Upload a file to S3 via the PushKit API.
+
+The upload is a 3-step process handled automatically:
+  1. init    — reserve a file ID and get a presigned S3 PUT URL
+  2. PUT     — upload the file bytes directly to S3
+  3. complete — finalize the upload and record metadata
+
+Options:
+  --name     Override the filename stored in the API (default: basename of <file>)
+  --tag      Attach key=value metadata tags (repeatable)
+  --sha256   Compute and send a SHA-256 hash for server-side integrity verification
+
+JSON output (--json):
+  On success, prints a JSON object to stdout:
+    {"id":"...","originalFilename":"...","contentType":"...","sizeBytes":1234,"status":"uploaded"}
+  On failure, prints {"error":"message"} to stderr and exits non-zero.
+  Progress bars and status messages are suppressed.`,
+	Example: `  # Upload a file (human-readable output)
+  pushkit upload ./report.pdf
+
+  # Upload with custom name and tags
+  pushkit upload ./data.csv --name quarterly.csv --tag team=analytics --tag quarter=Q1
+
+  # Upload with integrity check and JSON output (for scripts/agents)
+  pushkit upload ./backup.tar.gz --sha256 --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runUpload,
 }
 
 var (
@@ -58,13 +83,13 @@ func runUpload(cmd *cobra.Command, args []string) error {
 
 	var hashStr *string
 	if uploadSHA256 {
-		fmt.Fprintf(os.Stderr, "Computing SHA-256...\n")
+		logStderr("Computing SHA-256...\n")
 		h, err := computeSHA256(filePath)
 		if err != nil {
 			return fmt.Errorf("compute SHA-256: %w", err)
 		}
 		hashStr = &h
-		fmt.Fprintf(os.Stderr, "SHA-256: %s\n", h)
+		logStderr("SHA-256: %s\n", h)
 	}
 
 	tags := parseTags(uploadTags)
@@ -76,7 +101,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	fmt.Fprintf(os.Stderr, "Initializing upload for %s (%s, %s)...\n",
+	logStderr("Initializing upload for %s (%s, %s)...\n",
 		filename, contentType, progress.FormatBytes(size))
 
 	initResp, err := c.InitUpload(ctx, &apiclient.UploadInitRequest{
@@ -89,7 +114,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init upload: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "File ID: %s\n", initResp.FileID)
+	logStderr("File ID: %s\n", initResp.FileID)
 
 	// Use Content-Type from the backend's requiredHeaders (which matches the
 	// presigned URL signature) rather than the locally-detected value.
@@ -98,7 +123,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		putContentType = ct
 	}
 
-	fmt.Fprintf(os.Stderr, "Uploading to S3...\n")
+	logStderr("Uploading to S3...\n")
 
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -106,14 +131,22 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close()
 
-	pr := progress.NewReader(f, size)
+	// In JSON mode, skip the progress bar — pass the raw file reader.
+	var body io.Reader = f
+	var pr *progress.Reader
+	if !flagJSON {
+		pr = progress.NewReader(f, size)
+		body = pr
+	}
 
-	if err := c.PutToPresignedURL(ctx, initResp.PresignedPutURL, pr, putContentType, size); err != nil {
+	if err := c.PutToPresignedURL(ctx, initResp.PresignedPutURL, body, putContentType, size); err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
-	pr.Finish()
+	if pr != nil {
+		pr.Finish()
+	}
 
-	fmt.Fprintf(os.Stderr, "Finalizing upload...\n")
+	logStderr("Finalizing upload...\n")
 
 	completeReq := &apiclient.UploadCompleteRequest{
 		FileID:    initResp.FileID,
@@ -125,6 +158,10 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	result, err := c.CompleteUpload(ctx, completeReq)
 	if err != nil {
 		return fmt.Errorf("complete upload: %w", err)
+	}
+
+	if flagJSON {
+		return outputJSON(result)
 	}
 
 	fmt.Printf("Upload complete!\n")
