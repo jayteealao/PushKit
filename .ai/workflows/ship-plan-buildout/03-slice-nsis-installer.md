@@ -3,7 +3,7 @@ schema: sdlc/v1
 type: slice
 slug: ship-plan-buildout
 slice-slug: nsis-installer
-status: defined
+status: implemented
 stage-number: 3
 created-at: "2026-05-22T22:46:55Z"
 updated-at: "2026-05-22T22:46:55Z"
@@ -64,7 +64,7 @@ This is the highest-uncertainty piece of the workflow per Round 2 risk ordering.
 
 - **Given** the maintainer runs `makensis -DVERSION=0.1.0-test-1 backend/installer/pushkit.nsi` on a Windows machine with NSIS 3.10 installed, **when** the build completes, **then** `pushkit-server-setup.exe` is produced in `backend/installer/` (or `dist/`, location decided in plan stage).
 - **Given** the installer is run interactively with the service component ticked on a fresh Windows machine, **when** the install completes and the user runs `sc query PushKitServer`, **then** the service is registered with `STATE: 1 STOPPED` (start type demand). *(AC7 partial — interactive verification on maintainer's machine.)*
-- **Given** the installer is run silent (`pushkit-server-setup.exe /S`), **when** the install completes, **then** `"%ProgramFiles%\PushKit\pushkit-server.exe"` exists, Start Menu shortcut exists, and `sc query PushKitServer` returns service-not-found (silent skips service component).
+- **Given** the installer is run silent (`pushkit-server-setup.exe /S`), **when** the install completes, **then** `"%ProgramFiles%\PushKit\pushkit-server.exe"` exists, Start Menu shortcut exists, and `sc query PushKitServer` returns the registered service in `STATE: 1 STOPPED` (silent install respects the default-checked service component and registers the service). *AC updated from original draft which said silent skips service — PO chose default-checked knowing this divergence; see plan `## Blockers`.*
 - **Given** an existing install with the service component registered and running, **when** the installer is re-run with a newer version, **then** the service is stopped, the binary replaced, and the service restarted automatically. No orphan files or registry keys.
 - **Given** an existing install, **when** the uninstaller is run from Apps & Features, **then** the service is stopped, deregistered, files removed, Start Menu folder removed, registry keys removed. No residue.
 

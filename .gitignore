@@ -1,2 +1,6 @@
 node_modules/
 dist/
+
+# NSIS installer build outputs
+backend/installer/pushkit-server-setup.exe
+backend/pushkit-server.exe

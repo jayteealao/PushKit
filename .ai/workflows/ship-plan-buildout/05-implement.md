@@ -5,11 +5,11 @@ slug: ship-plan-buildout
 status: in-progress
 stage-number: 5
 created-at: "2026-05-25T11:54:43Z"
-updated-at: "2026-05-25T11:54:43Z"
-slices-implemented: 1
+updated-at: "2026-05-25T23:53:56Z"
+slices-implemented: 2
 slices-total: 5
-metric-total-files-changed: 7
-metric-total-lines-added: 511
+metric-total-files-changed: 11
+metric-total-lines-added: 809
 metric-total-lines-removed: 0
 tags:
   - ci-cd
@@ -31,7 +31,7 @@ next-invocation: "/wf verify ship-plan-buildout commit-hygiene"
 |-------|--------|----------|
 | commit-hygiene | complete | [05-implement-commit-hygiene.md](05-implement-commit-hygiene.md) |
 | backend-version | not-started | — |
-| nsis-installer | not-started | — |
+| nsis-installer | complete | [05-implement-nsis-installer.md](05-implement-nsis-installer.md) |
 | android-versioning | not-started | — |
 | release-orchestration | not-started | — |
 
