@@ -8,8 +8,8 @@ current-stage: verify
 stage-number: 6
 workflow-type: standard
 created-at: "2026-05-22T21:28:25Z"
-updated-at: "2026-05-26T11:13:29Z"
-selected-slice: "nsis-installer"
+updated-at: "2026-05-26T12:55:33Z"
+selected-slice: "android-versioning"
 branch-strategy: dedicated
 branch: "feat/ship-plan-buildout"
 base-branch: "main"
@@ -45,12 +45,16 @@ stack:
     - {name: web-reader, hint: "Fetch official docs (GitHub Actions, NSIS, git-cliff)"}
     - {name: web-search-prime, hint: "Find current versions / recipes"}
   user-confirmed: true
-next-command: wf-review
-next-invocation: "/wf review ship-plan-buildout"
+next-command: wf-verify
+next-invocation: "/wf verify ship-plan-buildout android-versioning"
 runtime-evidence-deferrals:
   - slice: commit-hygiene
     reason: "AC2 (commitlint-backstop fault-detection) and AC3 (backend-test fault-detection) require deliberate test PRs with bad commits; skipped by maintainer in verify triage. Configuration inspection confirms correct wiring."
     deferred-at: "2026-05-25T14:28:26Z"
+    cleared-by: null
+  - slice: backend-version
+    reason: "AC4 (wheel metadata URL): make and pip unavailable in verify environment; Makefile:13 and release.yml:44 confirmed correct via static grep. Clear by running make build-wheels VERSION=0.1.0-test-1 on a machine with make+pip and inspecting unzip -p dist/pushkit-*.whl '*/METADATA' | grep Home-page."
+    deferred-at: "2026-05-26T11:37:46Z"
     cleared-by: null
 workflow-files:
   - 00-index.md
@@ -72,7 +76,10 @@ workflow-files:
   - 05-implement-nsis-installer.md
   - 06-verify-nsis-installer.md
   - 04-plan-backend-version.md
+  - 04-plan-android-versioning.md
   - 05-implement-backend-version.md
+  - 06-verify-backend-version.md
+  - 05-implement-android-versioning.md
   - po-answers.md
   - 00-sync.md
 progress:

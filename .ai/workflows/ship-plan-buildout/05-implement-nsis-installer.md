@@ -12,7 +12,7 @@ metric-lines-added: 298
 metric-lines-removed: 0
 metric-deviations-from-plan: 1
 metric-review-fixes-applied: 0
-commit-sha: ""
+commit-sha: "4fd1fac"
 tags:
   - nsis
   - windows
