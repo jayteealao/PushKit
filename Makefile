@@ -10,7 +10,7 @@ build-wheels:
 		--set-version-var main.Version \
 		--entry-point pushkit \
 		--description "PushKit CLI — upload and manage files via an S3-backed API" \
-		--url "https://github.com/pushkit/cli" \
+		--url "https://github.com/jayteealao/PushKit" \
 		--license MIT \
 		--output-dir dist/
 

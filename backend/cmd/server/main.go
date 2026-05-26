@@ -1,6 +1,9 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,7 +18,22 @@ import (
 	s3client "github.com/pushkit/backend/internal/s3"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=<tag>".
+var Version = "dev"
+
+// printVersion writes "pushkit-server <v>" to w.
+func printVersion(w io.Writer, v string) {
+	fmt.Fprintf(w, "pushkit-server %s\n", v)
+}
+
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		printVersion(os.Stdout, Version)
+		os.Exit(0)
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 

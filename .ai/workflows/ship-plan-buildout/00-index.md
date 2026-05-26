@@ -8,8 +8,8 @@ current-stage: verify
 stage-number: 6
 workflow-type: standard
 created-at: "2026-05-22T21:28:25Z"
-updated-at: "2026-05-25T23:53:56Z"
-selected-slice: "commit-hygiene"
+updated-at: "2026-05-26T11:13:29Z"
+selected-slice: "nsis-installer"
 branch-strategy: dedicated
 branch: "feat/ship-plan-buildout"
 base-branch: "main"
@@ -70,6 +70,9 @@ workflow-files:
   - 06-verify.md
   - 06-verify-commit-hygiene.md
   - 05-implement-nsis-installer.md
+  - 06-verify-nsis-installer.md
+  - 04-plan-backend-version.md
+  - 05-implement-backend-version.md
   - po-answers.md
   - 00-sync.md
 progress:
