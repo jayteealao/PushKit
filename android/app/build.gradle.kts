@@ -12,8 +12,8 @@ android {
         applicationId = "com.pushkit.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = providers.gradleProperty("versionCodeOverride").orNull?.toIntOrNull() ?: 1
+        versionName = providers.gradleProperty("versionNameOverride").orNull ?: "1.0"
     }
 
     buildTypes {

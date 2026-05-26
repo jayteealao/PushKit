@@ -5,9 +5,9 @@ slug: ship-plan-buildout
 status: complete
 stage-number: 4
 created-at: "2026-05-22T23:44:29Z"
-updated-at: "2026-05-25T23:33:45Z"
+updated-at: "2026-05-26T12:44:00Z"
 planning-mode: single
-slices-planned: 2
+slices-planned: 4
 slices-total: 5
 implementation-order:
   - commit-hygiene
@@ -59,13 +59,29 @@ next-invocation: "/wf implement ship-plan-buildout nsis-installer"
   - Local iteration: README documents `go build -o backend/pushkit-server.exe` before `makensis`.
 - **Key risk:** Slice AC3 contradiction — silent install now registers the service (was "silent skips service component" per spec). Resolution is a single-line edit to `03-slice-nsis-installer.md`. The plan otherwise has zero hard blockers.
 
-### `backend-version` (not yet planned)
+### `backend-version` (planned 2026-05-26)
 
-- Pending. Small mechanical slice; can be planned quickly after `commit-hygiene` lands.
+- **Files to touch:** 4 (`backend/cmd/server/main.go`, `backend/cmd/server/main_test.go` (new), `Makefile`, `.github/workflows/release.yml`).
+- **Strategy:** Add `var Version = "dev"` + `flag.Bool("version", ...)` check at the top of `main()` before `config.Load()`. Extract `printVersion(w io.Writer, v string)` for testability. Create `main_test.go` with a unit test for `printVersion` and two subprocess tests via `exec.Command` (default build + ldflags-injected build). Fix two cosmetic URL bugs (`pushkit/cli` → `jayteealao/PushKit`).
+- **Key decisions locked (plan-stage discovery):**
+  - No `-v` short alias (PO confirmed `--version` only; `-v` conflicts with Go verbose convention).
+  - Unit + subprocess test (PO wants both `printVersion` unit test and `TestVersionFlag_LdflagsInjected` subprocess test).
+  - Stdlib `flag` only — no new module dependencies.
+  - Print to stdout, `os.Exit(0)`.
+- **Key risk:** Subprocess test builds the binary in `TestMain` (~3–5 s overhead). Acceptable for xs; can be gated on `testing.Short()` if noisy.
 
-### `android-versioning` (not yet planned)
+### `android-versioning` (planned 2026-05-26)
 
-- Pending. Single-file Gradle change; can be planned quickly.
+- **Files to touch:** 2 (`android/app/build.gradle.kts`, `android/README.md` (new)).
+- **Strategy:** Replace hard-coded `versionCode = 1` / `versionName = "1.0"` with `providers.gradleProperty` lookups and safe fallback defaults. No file mutation at CI time — CI passes `-PversionCodeOverride=N -PversionNameOverride=X` to Gradle. Local dev builds continue to use defaults with no flags required.
+- **Key decisions locked (plan-stage discovery):**
+  - `providers.gradleProperty` (lazy, configuration-cache-safe) over legacy `project.findProperty`.
+  - Property names `versionCodeOverride` / `versionNameOverride` to avoid DSL name shadowing.
+  - `toIntOrNull()` not `toInt()` — safe against empty-string edge case.
+  - Verification via `aapt dump badging` only; no new test source set (zero existing Android tests; two-line build-config change doesn't justify infra from scratch).
+  - README at `android/README.md` (module root, more discoverable).
+- **Cross-slice CI contract:** `release-orchestration` MUST pass `-PversionCodeOverride=$(git rev-list --count HEAD)` and `-PversionNameOverride=${GITHUB_REF_NAME#v}` with `fetch-depth: 0` checkout. See `04-plan-android-versioning.md § CI Contract`.
+- **Key risk:** `-P` vs `-D` flag confusion — `-D` sets a JVM system property, silently invisible to `providers.gradleProperty`. Documented in plan and must be carried forward to the `release-orchestration` plan.
 
 ### `release-orchestration` (not yet planned)
 
@@ -100,7 +116,7 @@ next-invocation: "/wf implement ship-plan-buildout nsis-installer"
 1. **`commit-hygiene`** — hard prerequisite; smallest planning surface; foundation. Plan ready in `04-plan-commit-hygiene.md`. **Status: implemented; verify in progress.**
 2. **`nsis-installer`** — highest uncertainty; most iteration time. Plan ready in `04-plan-nsis-installer.md`. **Status: planned 2026-05-25.**
 3. **`backend-version`** — mechanical. Quick plan.
-4. **`android-versioning`** — single-file Gradle change. Quick plan.
+4. **`android-versioning`** — single-file Gradle change. Plan ready in `04-plan-android-versioning.md`. **Status: planned 2026-05-26.**
 5. **`release-orchestration`** — integrator. Plan after 2–4 to incorporate their final shapes. Must consume `nsis-installer`'s file-path contracts and the NSIS 3.12 minimum-version requirement.
 
 ## Conflicts Found
@@ -130,6 +146,13 @@ No CVEs in the past 12 months for any pinned dependency. Supply-chain hardening 
 
 ## Recommended Next Stage
 
-- **Option A (default):** `/wf implement ship-plan-buildout nsis-installer` — execute the freshly-planned slice. `commit-hygiene` is already verified (post-implement); branch is on `feat/ship-plan-buildout`. Plan has one flagged blocker (slice AC3 doc update), resolvable inline. Run `/compact` first to clear planning context.
-- **Option B:** `/wf plan ship-plan-buildout backend-version` — plan the next slice (xs/mechanical) before implementing `nsis-installer`. Useful if the maintainer wants all remaining plans before any further implementation.
-- **Option C:** `/wf plan ship-plan-buildout all` — plan the remaining three slices in parallel (`backend-version`, `android-versioning`, `release-orchestration`). Trade-off: large context across multiple files; `release-orchestration` benefits from having the other plans finalized first.
+Current status (2026-05-26):
+- `commit-hygiene`: ✅ verified
+- `nsis-installer`: ✅ implemented (verify in progress)
+- `backend-version`: ✅ verified
+- `android-versioning`: ✅ planned → ready to implement
+- `release-orchestration`: ⏳ not yet planned
+
+- **Option A (default):** `/wf implement ship-plan-buildout android-versioning` — 2 files, 2 property lines, 1 README. Zero blockers. Run `/compact` first to clear planning context.
+- **Option B:** `/wf plan ship-plan-buildout release-orchestration` — plan the final integrator slice before implementing `android-versioning`. Useful to have all five plans complete before any remaining implementation.
+- **Option C:** Implement `android-versioning` then immediately plan + implement `release-orchestration` — the integrator needs all four precursor slices to be implemented before meaningful CI validation.

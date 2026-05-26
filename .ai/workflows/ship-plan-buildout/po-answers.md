@@ -131,3 +131,27 @@ Two rounds of discovery (8 questions total) on implementation decisions the shap
 - **Service component default:** **Default-checked.** Diverges from slice spec line 48 ("default unchecked") — the spec is being intentionally updated based on web-research finding that the service IS the product and silent installs should auto-register. **Consequence:** silent `/S` install now registers the service. This conflicts with slice AC3 ("silent skips service component"). The plan's `## Blockers` section flags the AC contradiction and recommends the slice doc be updated alongside this plan landing.
 - **Install directory:** **Pinned to `$PROGRAMFILES64\PushKit`.** No `MUI_PAGE_DIRECTORY`; install path is hardcoded. Shape's smoke-test AC asserts `%ProgramFiles%\PushKit\pushkit-server.exe` literally; allowing user-chosen paths introduces space-handling edge cases the smoke-test won't catch.
 - **Local binary input:** **README documents `go build` step.** `backend/installer/README.md` instructs `go build -o backend/pushkit-server.exe ./backend/cmd/server` (or for size: `go build -ldflags="-s -w" ...`) before invoking `makensis`. The untracked `backend/pushkit-server.exe` already on the maintainer's disk works for immediate iteration, but the documented path makes fresh-clone reproducibility cheap. NSIS script reads from a path relative to itself; the plan implementation specifies this exact relative path.
+
+---
+
+## Stage 4 — Plan: backend-version (2026-05-26T11:13:29Z)
+
+Two discovery questions covering flag-design choices the shape left implicit.
+
+### Round 1 — Flag design
+
+- **`-v` short alias:** **`--version` only.** PO confirmed no `-v` alias. Reason: `-v` conventionally means verbose in Go tooling (`go test -v`, `go vet -v`). Accepting `-v` for version would conflict if verbose logging is added to the server binary later.
+- **Test scope:** **Unit + subprocess test.** PO wants both: a unit test for `printVersion(w io.Writer, v string)` and a subprocess test (`exec.Command`) that builds the binary and verifies `--version` output, including with a ldflags-injected version string. The ldflags-injection test is the key AC11 coverage path.
+
+---
+
+## Stage 4 — Plan: android-versioning (2026-05-26T12:44:00Z)
+
+One round of discovery (4 questions) on implementation choices the shape and slice left implicit. Research via parallel Explore + web-research sub-agents confirmed the Gradle 8.5 / AGP 8.2.2 stack and found zero existing test infrastructure in the Android project.
+
+### Round 1 — Implementation decisions
+
+- **Version injection mechanism:** **Gradle property overrides (option A).** `providers.gradleProperty` in `build.gradle.kts` with fallback defaults. CI passes `-P` flags. No file mutation, cross-platform, locally testable without CI. Chosen over sed/inline edit (option B) on all technical dimensions.
+- **Property API:** **`providers.gradleProperty` (modern).** Lazy evaluation, `Provider<String>` return type, configuration-cache-safe, clean `.orNull` null handling. Correct for AGP 8.2.2 / Gradle 8.5. No deprecation warnings at these versions. Legacy `project.findProperty` rejected (eager, `Any?` return, not configuration-cache-safe).
+- **README location:** **`android/README.md`.** Module-level README covering the full Android build surface. More discoverable than `android/app/README.md` for contributors. Neither file existed prior to this slice.
+- **Test coverage:** **Local `aapt dump badging` only.** No new test source set. Zero existing Android tests; the Android project has no `src/test/` directory. A two-line build-config change with safe fallback defaults does not justify standing up test infra from scratch. Slice complexity:s rating is consistent with this scope.
