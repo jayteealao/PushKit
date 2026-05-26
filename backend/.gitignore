@@ -1,5 +1,5 @@
-server
-pushkit-server
+/server
+/pushkit-server
 *.db
 *.db-wal
 *.db-shm

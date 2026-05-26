@@ -3,7 +3,7 @@ schema: sdlc/v1
 type: slice
 slug: ship-plan-buildout
 slice-slug: backend-version
-status: defined
+status: implemented
 stage-number: 3
 created-at: "2026-05-22T22:46:55Z"
 updated-at: "2026-05-22T22:46:55Z"
