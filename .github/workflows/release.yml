@@ -8,12 +8,93 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-publish:
+  tag-guard:
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is reachable from main
+        run: |
+          git fetch origin main --depth=0 || git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not reachable from origin/main. Release aborted."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME confirmed on main."
+
+  retest-backend:
+    needs: [tag-guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: backend
+
+      - name: Test
+        run: go test ./...
+        working-directory: backend
+
+  retest-cli:
+    needs: [tag-guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: cli
+
+      - name: Test
+        run: go test ./...
+        working-directory: cli
+
+  retest-android:
+    needs: [tag-guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Build and lint
+        run: ./gradlew assembleDebug lint testDebugUnitTest
+        working-directory: android
+
+  build-cli-wheel:
+    needs: [retest-backend, retest-cli, retest-android]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,20 +113,332 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build wheels
+      - name: Build wheel
+        run: make build-wheels VERSION=${{ steps.version.outputs.VERSION }}
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-wheel
+          path: dist/*.whl
+          retention-days: 7
+          if-no-files-found: error
+
+  build-backend-binary:
+    needs: [retest-backend, retest-cli, retest-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile pushkit-server.exe
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
         run: |
-          pip install go-to-wheel
-          go-to-wheel ./cli \
-            --name pushkit \
-            --version ${{ steps.version.outputs.VERSION }} \
-            --set-version-var main.Version \
-            --entry-point pushkit \
-            --description "PushKit CLI — upload and manage files via an S3-backed API" \
-            --url "https://github.com/jayteealao/PushKit" \
-            --license MIT \
-            --output-dir dist/
+          go build \
+            -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }}" \
+            -o pushkit-server.exe \
+            ./cmd/server
+        working-directory: backend
+
+      - name: Upload backend binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-windows-binary
+          path: backend/pushkit-server.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  build-backend-installer:
+    needs: [build-backend-binary]
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download backend binary
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-windows-binary
+          path: backend/
+
+      - name: Install NSIS 3.12
+        uses: repolevedavaj/install-nsis@v1
+        with:
+          nsis-version: "3.12"
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION_STRIPPED=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Run makensis
+        shell: cmd
+        run: makensis /V3 /DVERSION=${{ steps.version.outputs.VERSION_STRIPPED }} backend\installer\pushkit.nsi
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: backend/installer/pushkit-server-setup.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  build-android-apk:
+    needs: [retest-backend, retest-cli, retest-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Compute version overrides
+        id: overrides
+        run: |
+          VERSION_CODE=$(git rev-list --first-parent --count HEAD)
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        run: |
+          ./gradlew assembleDebug \
+            -PversionCodeOverride=${{ steps.overrides.outputs.VERSION_CODE }} \
+            -PversionNameOverride=${{ steps.overrides.outputs.VERSION_NAME }}
+        working-directory: android
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk pushkit-android.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: pushkit-android.apk
+          retention-days: 7
+          if-no-files-found: error
+
+  generate-changelog:
+    needs: [retest-backend, retest-cli, retest-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ github.ref_name }} -o CHANGELOG-${{ github.ref_name }}.md
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG-${{ github.ref_name }}.md
+          retention-days: 7
+          if-no-files-found: error
+
+  publish-pypi:
+    needs:
+      - build-cli-wheel
+      - build-backend-installer
+      - build-android-apk
+      - generate-changelog
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-wheel
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          attestations: false
+
+  create-github-release:
+    needs:
+      - publish-pypi
+      - build-backend-installer
+      - build-android-apk
+      - generate-changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{windows-installer,android-apk,changelog}"
+          merge-multiple: true
+          path: release-assets/
+
+      - name: Generate SHA256SUMS
+        working-directory: release-assets
+        run: |
+          sha256sum pushkit-server-setup.exe pushkit-android.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Determine prerelease flag
+        id: prerelease
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ -(rc|alpha|beta) ]]; then
+            echo "IS_PRERELEASE=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "IS_PRERELEASE=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release-assets/CHANGELOG-${{ github.ref_name }}.md
+          prerelease: ${{ steps.prerelease.outputs.IS_PRERELEASE }}
+          make_latest: ${{ steps.prerelease.outputs.IS_PRERELEASE == 'false' }}
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/pushkit-server-setup.exe
+            release-assets/pushkit-android.apk
+            release-assets/SHA256SUMS
+
+  post-publish-linux:
+    needs: [create-github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compute PEP 440 normalized version
+        id: normalize
+        run: |
+          STRIPPED="${GITHUB_REF_NAME#v}"
+          VERSION_PEP440=$(python -c "from packaging.version import Version; print(Version('${STRIPPED}'))")
+          echo "VERSION_PEP440=$VERSION_PEP440" >> "$GITHUB_OUTPUT"
+
+      - name: Fresh resolve from PyPI (AC6)
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --upgrade pip
+          /tmp/venv/bin/pip install --no-cache-dir --pre "pushkit==${{ steps.normalize.outputs.VERSION_PEP440 }}"
+          /tmp/venv/bin/pushkit --version
+
+      - name: Assert GitHub Release assets (AC5 automated portion)
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+            --jq '.assets[].name' | sort > actual-assets.txt
+          printf 'SHA256SUMS\npushkit-android.apk\npushkit-server-setup.exe\n' | sort > expected-assets.txt
+          diff actual-assets.txt expected-assets.txt
+
+      - name: Download release assets
+        run: |
+          mkdir -p post-publish-assets
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "pushkit-android.apk" \
+            --pattern "pushkit-server-setup.exe" \
+            --pattern "SHA256SUMS" \
+            --dir post-publish-assets
+
+      - name: APK version probe (AC8)
+        run: |
+          AAPT="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt -type f 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "${AAPT}" || ! -x "${AAPT}" ]]; then
+            echo "::error::aapt not found under ANDROID_HOME build-tools"
+            exit 1
+          fi
+          echo "Using aapt at: ${AAPT}"
+          BADGING=$("${AAPT}" dump badging post-publish-assets/pushkit-android.apk)
+          echo "${BADGING}" | grep -E "versionCode|versionName"
+
+          EXPECTED_NAME="${GITHUB_REF_NAME#v}"
+          if ! echo "${BADGING}" | grep -q "versionName='${EXPECTED_NAME}'"; then
+            echo "::error::APK versionName mismatch (expected ${EXPECTED_NAME})"
+            exit 1
+          fi
+          if ! echo "${BADGING}" | grep -qE "versionCode='[0-9]+'"; then
+            echo "::error::APK versionCode missing or non-numeric"
+            exit 1
+          fi
+
+      - name: Verify SHA256SUMS (AC10)
+        working-directory: post-publish-assets
+        run: sha256sum -c SHA256SUMS
+
+  post-publish-windows:
+    needs: [create-github-release]
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download installer from GitHub Release
+        shell: pwsh
+        run: |
+          gh release download "${env:GITHUB_REF_NAME}" `
+            --repo "${env:GITHUB_REPOSITORY}" `
+            --pattern "pushkit-server-setup.exe" `
+            --dir .
+
+      - name: Silent install (AC7)
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath ".\pushkit-server-setup.exe" -ArgumentList "/S" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "Silent install failed with exit code $($proc.ExitCode)"
+            exit $proc.ExitCode
+          }
+
+      - name: Smoke-test pushkit-server --version (AC7)
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:ProgramFiles "PushKit\pushkit-server.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "pushkit-server.exe not found at $exe"
+            exit 1
+          }
+          $actual = (& $exe --version | Out-String).Trim()
+          $expected = "pushkit-server $(${env:GITHUB_REF_NAME}.TrimStart('v'))"
+          Write-Host "Expected: $expected"
+          Write-Host "Actual:   $actual"
+          if ($actual -ne $expected) {
+            Write-Error "Smoke-test mismatch"
+            exit 1
+          }
