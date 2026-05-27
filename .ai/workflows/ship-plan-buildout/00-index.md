@@ -4,12 +4,12 @@ type: index
 slug: ship-plan-buildout
 title: "Build out CI infra + code to satisfy the ship-plan contract"
 status: active
-current-stage: verify
-stage-number: 6
+current-stage: implement
+stage-number: 5
 workflow-type: standard
 created-at: "2026-05-22T21:28:25Z"
-updated-at: "2026-05-26T12:55:33Z"
-selected-slice: "android-versioning"
+updated-at: "2026-05-27T18:24:55Z"
+selected-slice: "release-orchestration"
 branch-strategy: dedicated
 branch: "feat/ship-plan-buildout"
 base-branch: "main"
@@ -46,7 +46,7 @@ stack:
     - {name: web-search-prime, hint: "Find current versions / recipes"}
   user-confirmed: true
 next-command: wf-verify
-next-invocation: "/wf verify ship-plan-buildout android-versioning"
+next-invocation: "/wf verify ship-plan-buildout release-orchestration"
 runtime-evidence-deferrals:
   - slice: commit-hygiene
     reason: "AC2 (commitlint-backstop fault-detection) and AC3 (backend-test fault-detection) require deliberate test PRs with bad commits; skipped by maintainer in verify triage. Configuration inspection confirms correct wiring."
@@ -77,9 +77,12 @@ workflow-files:
   - 06-verify-nsis-installer.md
   - 04-plan-backend-version.md
   - 04-plan-android-versioning.md
+  - 04-plan-release-orchestration.md
   - 05-implement-backend-version.md
   - 06-verify-backend-version.md
   - 05-implement-android-versioning.md
+  - 06-verify-android-versioning.md
+  - 05-implement-release-orchestration.md
   - po-answers.md
   - 00-sync.md
 progress:

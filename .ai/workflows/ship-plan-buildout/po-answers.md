@@ -155,3 +155,29 @@ One round of discovery (4 questions) on implementation choices the shape and sli
 - **Property API:** **`providers.gradleProperty` (modern).** Lazy evaluation, `Provider<String>` return type, configuration-cache-safe, clean `.orNull` null handling. Correct for AGP 8.2.2 / Gradle 8.5. No deprecation warnings at these versions. Legacy `project.findProperty` rejected (eager, `Any?` return, not configuration-cache-safe).
 - **README location:** **`android/README.md`.** Module-level README covering the full Android build surface. More discoverable than `android/app/README.md` for contributors. Neither file existed prior to this slice.
 - **Test coverage:** **Local `aapt dump badging` only.** No new test source set. Zero existing Android tests; the Android project has no `src/test/` directory. A two-line build-config change with safe fallback defaults does not justify standing up test infra from scratch. Slice complexity:s rating is consistent with this scope.
+
+---
+
+## Stage 4 — Plan: release-orchestration (2026-05-26T18:25:15Z)
+
+Three rounds of discovery (11 questions total) covering the integrator slice's structural decisions, operational details, and plumbing. All answers aligned with the recommended option after parallel Explore + web-research sub-agent findings on `release.yml`/`ci.yml` deep state, NSIS contract surface, GitHub Actions freshness (as of 2026-05-26), and PyPI Trusted Publishing posture.
+
+### Round 1 — Structural decisions
+
+- **Build topology:** **Cross-compile + Windows NSIS-wrap.** Job A on Linux cross-compiles `pushkit-server.exe` (`GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X main.Version=<tag>"`) and uploads as artifact. Job B on `windows-2022` downloads it to `backend/pushkit-server.exe`, installs NSIS 3.12, runs `makensis /V3 /DVERSION=<tag-without-v> backend/installer/pushkit.nsi`, uploads installer. ~3× cheaper than all-Windows; aligns with the NSIS slice's relative-path contract (`File "..\pushkit-server.exe"`).
+- **Release creation tool:** **`softprops/action-gh-release@v3`.** Native retry on flaky uploads, asset glob support, prerelease auto-detection via expression input. Resolves the slice's documented "gh release create upload flake" risk without a hand-rolled retry loop. Floating tag pinning matches repo style.
+- **Windows runner:** **`windows-2022` explicit.** Avoids the `windows-latest` → `windows-2025` drift and the upcoming VS 2026 migration window (June 2026). NSIS must be installed via action either way.
+- **Action major-version pins:** **Match existing `ci.yml`/`release.yml` exactly.** Stay on `actions/checkout@v4`, `actions/setup-go@v5`, `actions/setup-java@v4`, `actions/setup-python@v5`, `gradle/actions/setup-gradle@v4`. Use `actions/upload-artifact@v4` + `actions/download-artifact@v4` (v3 hard-deprecated; not in repo yet). No major-version bumps for existing actions — keeps diff minimal and CI consistent.
+
+### Round 2 — Operational details
+
+- **Prerelease auto-detection:** **`-rc`, `-alpha`, `-beta`.** Auto-mark prerelease when the tag contains any of these substrings. Future-proof beyond the shape's literal `-rc.*` heuristic; consistent with semver-prerelease convention. Implemented via shell expression: `[[ "${GITHUB_REF_NAME}" =~ -(rc|alpha|beta) ]]` → step output → `softprops`'s `prerelease:` input.
+- **Sigstore attestations (PyPI):** **`attestations: false`.** SLSA hardening is explicitly out of scope per intake/shape. Disabling saves one OIDC round-trip per publish, simplifies first-release debugging, and matches v0.x posture. Re-enable when SLSA hardening lands as a future workflow.
+- **Break-glass `PYPI_API_TOKEN` fallback:** **Documented in README only.** No fallback job in `release.yml`. The `## Releasing` README section documents the recovery procedure (swap publish step to use `password: ${{ secrets.PYPI_API_TOKEN }}` for one release, then revert). Smallest surface; consistent with the slice's "all-or-nothing" job graph.
+- **NSIS install action:** **`negrutiu/nsis-install@v2` with explicit NSIS 3.12 pin.** Most actively maintained NSIS marketplace action as of May 2026. Explicit version input locks the CVE-2025-43715 fix (NSIS ≤ 3.10 SYSTEM privilege escalation). Floating major-version tag matches the repo's action-pinning style.
+
+### Round 3 — Plumbing
+
+- **`post-publish-checks` topology:** **Two parallel jobs — `post-publish-linux` and `post-publish-windows`.** Linux job runs `fresh-resolve` (pip install + --version), `github-release` (gh api 200 + asset list), `apk-probe` (`aapt dump badging` via Android SDK), and `sha256sum -c SHA256SUMS`. Windows job runs only `smoke-test` (silent installer + `--version`). Clean platform-driven split; rejected matrix-job for readability.
+- **`cliff.toml` authoring:** **Init from `keepachangelog` template + minor tuning.** Run `git cliff --init keepachangelog` locally to seed `cliff.toml`, then tune `tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc|alpha|beta)\.[0-9]+)?$'` to match our scheme and add the commit-hygiene scope vocabulary (`backend|cli|android|ci|docs|deps|installer|release`) to `commit_parsers`. Industry-standard Keep-a-Changelog output format; matches shape's shields.io badge expectations.
+- **Smoke-test asset source:** **Download from the GitHub Release via `gh CLI`.** Tests the full publish + GH-Release upload + asset-download path end-to-end. A `softprops` upload corruption (theoretical) would fail this check. Adds ~5–10s vs artifact download; that's a fair trade for true end-to-end verification.

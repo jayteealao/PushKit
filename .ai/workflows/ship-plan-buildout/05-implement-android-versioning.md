@@ -12,7 +12,7 @@ metric-lines-added: 33
 metric-lines-removed: 2
 metric-deviations-from-plan: 0
 metric-review-fixes-applied: 0
-commit-sha: ""
+commit-sha: "8aefb9c"
 tags:
   - android
   - gradle

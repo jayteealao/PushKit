@@ -5,9 +5,9 @@ slug: ship-plan-buildout
 status: complete
 stage-number: 4
 created-at: "2026-05-22T23:44:29Z"
-updated-at: "2026-05-26T12:44:00Z"
+updated-at: "2026-05-26T18:25:15Z"
 planning-mode: single
-slices-planned: 4
+slices-planned: 5
 slices-total: 5
 implementation-order:
   - commit-hygiene
@@ -20,11 +20,16 @@ tags:
   - ci
   - lefthook
   - commitlint
+  - release
+  - github-actions
+  - nsis
+  - git-cliff
+  - pypi
 refs:
   index: 00-index.md
   slice-index: 03-slice.md
 next-command: wf-implement
-next-invocation: "/wf implement ship-plan-buildout nsis-installer"
+next-invocation: "/wf implement ship-plan-buildout android-versioning"
 ---
 
 # Plan Index: ship-plan-buildout
@@ -83,41 +88,67 @@ next-invocation: "/wf implement ship-plan-buildout nsis-installer"
 - **Cross-slice CI contract:** `release-orchestration` MUST pass `-PversionCodeOverride=$(git rev-list --count HEAD)` and `-PversionNameOverride=${GITHUB_REF_NAME#v}` with `fetch-depth: 0` checkout. See `04-plan-android-versioning.md § CI Contract`.
 - **Key risk:** `-P` vs `-D` flag confusion — `-D` sets a JVM system property, silently invisible to `providers.gradleProperty`. Documented in plan and must be carried forward to the `release-orchestration` plan.
 
-### `release-orchestration` (not yet planned)
+### `release-orchestration` (planned 2026-05-26)
 
-- Pending. The integrator. Should be planned last (or last-but-one) because its plan depends on the other four slices' final shapes.
+- **Files to touch:** 3 (rewrite `.github/workflows/release.yml`, new `cliff.toml`, modify `README.md` — add shields.io badge + `## Releasing` + `## Backend installer` sections).
+- **Strategy:** Expand release.yml from 1 job to 10 jobs (8 default + 2 post-publish split by platform). Cross-compile Go on Linux → upload artifact → download on `windows-2022` → NSIS-wrap. `softprops/action-gh-release@v3` creates the GH Release (native retry + glob support; resolves the documented `gh release create` upload-flake risk). `negrutiu/nsis-install@v2` pins NSIS 3.12 (CVE-2025-43715 fix). `pypa/gh-action-pypi-publish@release/v1` with `attestations: false` (v0.x posture). Prerelease auto-detection covers `-rc`, `-alpha`, `-beta`. Break-glass `PYPI_API_TOKEN` documented in README only, no fallback job in workflow.
+- **Key decisions locked (plan-stage discovery):**
+  - Cross-compile + Windows NSIS-wrap (cheapest topology; aligns with NSIS slice's `..\pushkit-server.exe` contract).
+  - `softprops/action-gh-release@v3` (built-in retry + glob; smaller blast radius than hand-rolled retry loops).
+  - `windows-2022` explicit (avoids `windows-latest` → `windows-2025` drift and the June-2026 VS-2026 migration).
+  - Match existing `ci.yml`/`release.yml` action pins exactly (no major-version bumps; only introduce `actions/upload-artifact@v4` and `actions/download-artifact@v4` because v3 is hard-deprecated).
+  - Prerelease auto-detect: `-rc`, `-alpha`, `-beta` (broader than shape's literal `-rc.*`).
+  - Sigstore attestations: false (SLSA hardening out of scope per intake).
+  - Break-glass PYPI_API_TOKEN: documented in README only (no fallback job).
+  - `negrutiu/nsis-install@v2` with explicit `nsis-version: "3.12"` pin.
+  - `post-publish-checks`: two parallel jobs (Linux + Windows) — clear platform-driven split.
+  - `cliff.toml`: init from `keepachangelog` template + minor tuning (tag_pattern, scope vocabulary).
+  - Smoke-test source: download from the GH Release via `gh CLI` (end-to-end verification of the upload path).
+- **Key risk:** First-release PyPI OIDC misconfig (shape Block F top failure mode) — mitigation is re-verifying the Trusted Publisher quartet on the PyPI dashboard before pushing the validation tag.
 
 ## Cross-Cutting Concerns
 
 - **Conventional Commits enforcement starts at commit 1 of the branch.** Every other slice's commits must parse. The first commit on `feat/ship-plan-buildout` is `commit-hygiene`'s own setup and must be authored conventionally by hand (the hook can't yet validate its own installation commit).
 - **Single shared branch (`feat/ship-plan-buildout`), single PR.** All five slices accumulate into one PR per intake's branch strategy. Each slice's implement/verify cycle runs locally on the branch before the next slice begins.
-- **No CHANGELOG.md committed.** Per ship-plan Block B and shape decision, the changelog is generated at release time by `release-orchestration`. Not part of this slice.
+- **No CHANGELOG.md committed.** Per ship-plan Block B and shape decision, the changelog is generated at release time by `release-orchestration`. The generate-changelog job writes a per-release artifact (`CHANGELOG-<tag>.md`) consumed by `softprops/action-gh-release@v3`'s `body_path` and then discarded with the workflow run.
 - **Node toolchain footprint is local-only.** CI uses `wagoid/commitlint-github-action@v6` which ships its own Node — no `npm ci` in any ci.yml job. The `package.json` exists solely so developers can run commitlint locally via lefthook.
-- **NSIS 3.12 is the minimum across local + CI.** Driven by CVE-2025-43715 (NSIS ≤ 3.10 SYSTEM privilege escalation). Shape's freshness research said "pre-installed 3.10 on windows-2022 is fine"; this is now updated. `release-orchestration`'s CI must install NSIS 3.12 explicitly (marketplace action) rather than rely on the runner image.
+- **NSIS 3.12 is the minimum across local + CI.** Driven by CVE-2025-43715 (NSIS ≤ 3.10 SYSTEM privilege escalation). Shape's freshness research said "pre-installed 3.10 on windows-2022 is fine"; this is now updated. `release-orchestration` uses `negrutiu/nsis-install@v2` with `nsis-version: "3.12"` explicitly.
 - **Vendored installer plugin (`SimpleSC.dll`).** First vendored binary in the repo. Recorded SHA256 in `backend/installer/README.md`. SLSA hardening (signature verification) deferred to a future workflow per intake.
-- **`backend/installer/pushkit.nsi` `File` directive resolves relative to the `.nsi` file.** From `backend/installer/`, `..\pushkit-server.exe` points to `backend/pushkit-server.exe`. Both local (`go build -o`) and CI (cross-compile artifact placement) must put the binary at exactly that path. Cross-slice contract between `nsis-installer` and `release-orchestration`.
+- **`backend/installer/pushkit.nsi` `File` directive resolves relative to the `.nsi` file.** From `backend/installer/`, `..\pushkit-server.exe` points to `backend/pushkit-server.exe`. Both local (`go build -o`) and CI (`build-backend-binary` cross-compile job places the artifact at `backend/pushkit-server.exe` via `actions/download-artifact@v4`) must put the binary at exactly that path. Cross-slice contract between `nsis-installer` and `release-orchestration`.
 - **Installer NFR (≤25 MB).** Go binary alone is 27.2 MB. `SetCompressor lzma` typically nets ~30–40% reduction → expected ~17–20 MB. If actual exceeds 25 MB, the NFR will be raised in handoff (not blocked at plan time).
+- **`fetch-depth: 0` is required for three jobs in `release.yml`.** `tag-guard` (needs history for `git merge-base --is-ancestor`), `build-android-apk` (needs full count for `git rev-list --first-parent --count HEAD`), `generate-changelog` (git-cliff needs full history). Silent failure mode: `fetch-depth: 1` produces a count of `1` and an empty changelog. Triple-check at implement-stage review.
+- **PyPI Sigstore attestations are OFF.** `pypa/gh-action-pypi-publish@release/v1` with `attestations: false` per discovery Round 2. SLSA hardening (re-enabling attestations) is a future workflow.
+- **Break-glass `PYPI_API_TOKEN` is documented, not wired.** The recovery procedure is in the new `## Releasing` README section. The default publish path is 100% OIDC; the secret stays sealed in repository secrets and is invoked manually by editing the publish step for one release when needed.
+- **`-P` not `-D` for Gradle version-overrides.** `release-orchestration`'s `build-android-apk` job uses `-PversionCodeOverride` / `-PversionNameOverride`. Using `-D` would set a JVM system property that's silently invisible to `providers.gradleProperty` — the #1 documented Gradle CI failure mode (per `android-versioning` plan).
+- **Prerelease tag heuristic broadens shape's literal.** Shape said `-rc.*`; discovery Round 2 broadened to `-rc`, `-alpha`, `-beta` (consistent with semver-prerelease intent). `softprops/action-gh-release@v3`'s `prerelease:` input is fed from a shell-expression step output.
 
 ## Integration Points Between Slices
 
 - `commit-hygiene` → all other slices: their commits will be CI-validated by the `commitlint-backstop` job in `ci.yml`. Failure mode is loud (PR red).
-- `commit-hygiene` ↔ `release-orchestration`: `ci.yml`'s `android-build` job uses default Gradle properties; `release.yml`'s build-android-apk job will inject `-PversionCodeOverride` / `-PversionNameOverride` (planned by `android-versioning` slice). No file conflict — different invocations of the same Gradle script.
-- `commit-hygiene` ↔ `backend-version`: the `--version` flag added in `backend-version` will eventually be exercised by `release.yml`'s post-publish smoke test. `ci.yml` doesn't exercise `--version`; it just runs `go test ./...`. No conflict.
-- `nsis-installer` → `release-orchestration` (HARD CONTRACT):
-  - CI's cross-compile job MUST place the Windows binary at `backend/pushkit-server.exe` (relative to repo root) before invoking makensis. This is the path the `.nsi`'s `File "..\pushkit-server.exe"` directive resolves to.
+- `commit-hygiene` ↔ `release-orchestration`: `ci.yml`'s `android-build` job uses default Gradle properties; `release.yml`'s `build-android-apk` job injects `-PversionCodeOverride` / `-PversionNameOverride`. No file conflict — different invocations of the same Gradle script.
+- `commit-hygiene` ↔ `backend-version`: the `--version` flag added in `backend-version` is exercised by `release.yml`'s `post-publish-windows` smoke-test. `ci.yml` doesn't exercise `--version`; it just runs `go test ./...`. No conflict.
+- `nsis-installer` → `release-orchestration` (HARD CONTRACT, satisfied by plan):
+  - `build-backend-installer` (`windows-2022`) downloads the `backend-windows-binary` artifact into `backend/pushkit-server.exe` via `actions/download-artifact@v4` BEFORE invoking makensis. This is the path the `.nsi`'s `File "..\pushkit-server.exe"` directive resolves to.
   - CI invocation: `makensis /V3 /DVERSION=<tag-without-v> backend/installer/pushkit.nsi` from repo root.
-  - Output artifact path: `backend/installer/pushkit-server-setup.exe`.
-  - NSIS version: 3.12 minimum (install step required; pre-installed 3.10 on `windows-2022` is no longer acceptable).
-- `nsis-installer` ↔ `commit-hygiene`: both touch root `.gitignore`. `commit-hygiene` creates it (adds `node_modules/`, `dist/`); `nsis-installer` appends (`backend/installer/pushkit-server-setup.exe`, `backend/pushkit-server.exe`). Clean append; no conflict if landed in slice order.
-- `nsis-installer` ↔ `backend-version`: no direct file overlap. The installer is indifferent to whether the wrapped binary has `--version`; the shape's smoke-test in `release-orchestration` is what exercises `--version` post-install.
+  - Output artifact path: `backend/installer/pushkit-server-setup.exe`, uploaded as `windows-installer`.
+  - NSIS version: 3.12 via `negrutiu/nsis-install@v2` with `nsis-version: "3.12"`.
+- `backend-version` → `release-orchestration` (HARD CONTRACT, satisfied by plan):
+  - `build-backend-binary` (Linux) builds with `-ldflags "-X main.Version=$VERSION_STRIPPED"` (the `v` prefix is stripped to match shape AC7's `pushkit-server 0.1.0-rc.1` expectation).
+  - `post-publish-windows.smoke-test` asserts the output via `& "$env:ProgramFiles\PushKit\pushkit-server.exe" --version`.
+- `android-versioning` → `release-orchestration` (HARD CONTRACT, satisfied by plan):
+  - `build-android-apk` (Linux) uses `fetch-depth: 0` and passes `-PversionCodeOverride=$(git rev-list --first-parent --count HEAD) -PversionNameOverride=${GITHUB_REF_NAME#v}` to `./gradlew assembleDebug`.
+  - **`-P` not `-D`** — silent failure otherwise (android-versioning plan flagged this as the #1 Gradle CI gotcha).
+  - APK renamed from `app-debug.apk` → `pushkit-android.apk` before upload as artifact `android-apk` to match shape AC8.
+- `nsis-installer` ↔ `commit-hygiene`: both touch root `.gitignore`. `commit-hygiene` creates it (adds `node_modules/`, `dist/`); `nsis-installer` appends (`backend/installer/pushkit-server-setup.exe`, `backend/pushkit-server.exe`). Clean append; no conflict.
+- `nsis-installer` ↔ `backend-version`: no direct file overlap. The installer is indifferent to whether the wrapped binary has `--version`; `release-orchestration`'s smoke-test is what exercises `--version` post-install.
 
 ## Recommended Implementation Order
 
-1. **`commit-hygiene`** — hard prerequisite; smallest planning surface; foundation. Plan ready in `04-plan-commit-hygiene.md`. **Status: implemented; verify in progress.**
-2. **`nsis-installer`** — highest uncertainty; most iteration time. Plan ready in `04-plan-nsis-installer.md`. **Status: planned 2026-05-25.**
-3. **`backend-version`** — mechanical. Quick plan.
-4. **`android-versioning`** — single-file Gradle change. Plan ready in `04-plan-android-versioning.md`. **Status: planned 2026-05-26.**
-5. **`release-orchestration`** — integrator. Plan after 2–4 to incorporate their final shapes. Must consume `nsis-installer`'s file-path contracts and the NSIS 3.12 minimum-version requirement.
+1. **`commit-hygiene`** — hard prerequisite; smallest planning surface; foundation. **Status: ✅ verified.**
+2. **`nsis-installer`** — highest uncertainty; most iteration time. **Status: ✅ implemented (verify in progress).**
+3. **`backend-version`** — mechanical. **Status: ✅ verified.**
+4. **`android-versioning`** — single-file Gradle change. **Status: ✅ planned → ready to implement.**
+5. **`release-orchestration`** — integrator. **Status: ✅ planned (2026-05-26). Ready to implement after slice 4 lands.**
 
 ## Conflicts Found
 
@@ -146,13 +177,14 @@ No CVEs in the past 12 months for any pinned dependency. Supply-chain hardening 
 
 ## Recommended Next Stage
 
-Current status (2026-05-26):
+Current status (2026-05-26 T18:25 UTC, all five plans complete):
 - `commit-hygiene`: ✅ verified
 - `nsis-installer`: ✅ implemented (verify in progress)
 - `backend-version`: ✅ verified
 - `android-versioning`: ✅ planned → ready to implement
-- `release-orchestration`: ⏳ not yet planned
+- `release-orchestration`: ✅ planned → ready to implement after slice 4
 
-- **Option A (default):** `/wf implement ship-plan-buildout android-versioning` — 2 files, 2 property lines, 1 README. Zero blockers. Run `/compact` first to clear planning context.
-- **Option B:** `/wf plan ship-plan-buildout release-orchestration` — plan the final integrator slice before implementing `android-versioning`. Useful to have all five plans complete before any remaining implementation.
-- **Option C:** Implement `android-versioning` then immediately plan + implement `release-orchestration` — the integrator needs all four precursor slices to be implemented before meaningful CI validation.
+- **Option A (default):** `/wf implement ship-plan-buildout android-versioning` — finish the precursor slice. 2 files, 2 property lines, 1 README. Zero blockers. Run `/compact` first to clear planning context.
+- **Option B:** `/wf implement ship-plan-buildout release-orchestration` — implement the integrator. Requires `android-versioning` to be implemented first (or in the same session) so `build-android-apk` has the `-P` overrides to consume. Plan is execution-ready; no blockers.
+- **Option C:** `/wf plan ship-plan-buildout all` — review-all mode to re-validate all five plans for cross-cohesion now that the integrator's specifics are pinned. Optional sanity pass.
+- **Option D:** `/wf review ship-plan-buildout` — early review pass against the cumulative branch diff (slug-wide review scope) before implementing the remaining slices. Lets reviewer findings shape the final integrator's implementation rather than chasing them post-hoc.
