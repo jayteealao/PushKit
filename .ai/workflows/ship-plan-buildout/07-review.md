@@ -7,7 +7,7 @@ slice-slug: ""
 status: complete
 stage-number: 7
 created-at: "2026-05-30T15:08:53Z"
-updated-at: "2026-05-30T17:40:35Z"
+updated-at: "2026-05-30T20:25:00Z"
 verdict: ship-with-caveats
 commands-run: [correctness, security, code-simplification, ci, release, supply-chain, infra-security, reliability, testing, maintainability, docs]
 metric-commands-run: 11
@@ -22,9 +22,9 @@ metric-issues-found-initial: 41
 metric-issues-found-final: 8
 metric-fix-decisions: 33
 metric-fix-patched: 33
-fix-rounds-run: 2
+fix-rounds-run: 3
 convergence: converged
-review-owned-fix-commit: "5a8fb79, c8011d9"
+review-owned-fix-commit: "5a8fb79, c8011d9, 21bf6c8, <pending-toolchain-fix>"
 tags: [release-engineering, ci-cd, security, supply-chain, nsis, android, go]
 refs:
   index: 00-index.md
@@ -214,10 +214,17 @@ This was not caught by the original review's "all uses: SHA-pinned" check, which
 confirmed the *form* of the pins but not that each SHA resolved to the named
 action.
 
+Once the pins were corrected and pushed, the five fast-failing jobs went green,
+which then let the `vuln-scan` security gate actually run — and it failed,
+surfacing a second, independent blocker (SEC-01).
+
 | ID | Severity | Status | Notes |
 |----|----------|--------|-------|
-| CI-01 | BLOCKER | Fixed | All 12 action pins re-resolved to the canonical SHA for their version tag across ci.yml, release.yml, go-test composite. Every pin verified against the GitHub commits API (HTTP 200). |
+| CI-01 | BLOCKER | Fixed | All 12 action pins re-resolved to the canonical SHA for their version tag across ci.yml, release.yml, go-test composite. Every pin verified against the GitHub commits API (HTTP 200). Confirmed green: backend-test, cli-test, android-build, commitlint-backstop all pass on the re-pinned run. |
 | NODE-01 | MED | Fixed | `package.json` engines `>=20` → `>=22.12.0`; README prerequisite `Node ≥ 20` → `Node ≥ 22.12` (matches `@commitlint/cli@21` requirement, addresses the open reviewer threads). |
+| SEC-01 | BLOCKER | Fixed | `govulncheck` gate flagged 7 called Go standard-library CVEs (net/crypto·x509/net·http/crypto·tls/os/net·url), all fixed in Go 1.25 patches. Bumped the CI/release Go toolchain `1.24` → `1.25` in all four `go-version` spots; `setup-go` resolves to ≥ go1.25.10, clearing every called vuln and shipping patched release binaries. README Go prerequisite bumped to `Go ≥ 1.25`. |
 
 **Verification:** ci.yml, release.yml, go-test action.yml parse as valid YAML;
-package.json parses as valid JSON; no unresolved action SHA remains.
+package.json parses as valid JSON; no unresolved action SHA remains; all five
+pre-merge jobs green after the pin fix; toolchain bump pushed to clear the
+security gate (CI re-run observed after push).
