@@ -12,8 +12,16 @@ android {
         applicationId = "com.pushkit.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("versionCodeOverride").orNull?.toIntOrNull() ?: 1
-        versionName = providers.gradleProperty("versionNameOverride").orNull ?: "1.0"
+        versionCode = providers.gradleProperty("versionCodeOverride").orNull.let { raw ->
+            if (raw == null) 1
+            else raw.toIntOrNull()?.takeIf { it > 0 }
+                ?: throw GradleException("versionCodeOverride must be a positive integer, got: '$raw'")
+        }
+        versionName = providers.gradleProperty("versionNameOverride").orNull.let { raw ->
+            if (raw == null) "1.0"
+            else raw.takeIf { it.isNotBlank() }
+                ?: throw GradleException("versionNameOverride must not be blank, got: '$raw'")
+        }
     }
 
     buildTypes {

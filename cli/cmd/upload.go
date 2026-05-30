@@ -132,12 +132,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	defer f.Close()
 
 	// In JSON mode, skip the progress bar — pass the raw file reader.
-	var body io.Reader = f
-	var pr *progress.Reader
-	if !flagJSON {
-		pr = progress.NewReader(f, size)
-		body = pr
-	}
+	body, pr := progress.MaybeNewReader(f, size, flagJSON)
 
 	if err := c.PutToPresignedURL(ctx, initResp.PresignedPutURL, body, putContentType, size); err != nil {
 		return fmt.Errorf("upload failed: %w", err)

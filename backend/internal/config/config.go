@@ -7,15 +7,19 @@ import (
 )
 
 type Config struct {
-	S3Bucket        string
-	AWSRegion       string
-	AWSAccessKeyID  string
-	AWSSecretKey    string
-	S3EndpointURL   string // optional, for MinIO/R2
-	DatabaseURL     string
-	ListenAddr      string
-	APIKeyMap       map[string]string // key -> user_id
-	PresignTTLSecs  int
+	S3Bucket       string
+	AWSRegion      string
+	AWSAccessKeyID string
+	AWSSecretKey   string
+	S3EndpointURL  string // optional, for MinIO/R2
+	DatabaseURL    string
+	ListenAddr     string
+	APIKeyMap      map[string]string // key -> user_id
+	PresignTTLSecs int
+	// TLS is optional. When both TLSCertFile and TLSKeyFile are set, the
+	// server starts in TLS mode (HTTPS). Leave either empty for plain HTTP.
+	TLSCertFile string // TLS_CERT_FILE env var
+	TLSKeyFile  string // TLS_KEY_FILE env var
 }
 
 func Load() (*Config, error) {
@@ -28,6 +32,8 @@ func Load() (*Config, error) {
 		DatabaseURL:    getEnvDefault("DATABASE_URL", "pushkit.db"),
 		ListenAddr:     getEnvDefault("LISTEN_ADDR", ":8000"),
 		PresignTTLSecs: 900,
+		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:     os.Getenv("TLS_KEY_FILE"),
 	}
 
 	if cfg.S3Bucket == "" {

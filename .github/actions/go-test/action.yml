@@ -1,0 +1,27 @@
+name: Go test
+description: >
+  Set up Go, run go vet and go test for a single module directory.
+  Caller must have already run actions/checkout before invoking this action.
+
+inputs:
+  module:
+    description: "Module subdirectory to test (e.g. backend or cli)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@34e114876b0b11c390a56381ad16ebd13914f8d5 # v5
+      with:
+        go-version: "1.24"
+
+    - name: Vet
+      shell: bash
+      run: go vet ./...
+      working-directory: ${{ inputs.module }}
+
+    - name: Test
+      shell: bash
+      run: go test ./...
+      working-directory: ${{ inputs.module }}

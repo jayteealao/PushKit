@@ -84,3 +84,15 @@ func formatBytes(b int64) string {
 func FormatBytes(b int64) string {
 	return formatBytes(b)
 }
+
+// MaybeNewReader returns a progress-tracking Reader when jsonMode is false,
+// or the raw reader unchanged when jsonMode is true (no progress output).
+// The second return value is the *Reader; callers must call Finish() on it
+// when done if it is non-nil.
+func MaybeNewReader(r io.Reader, total int64, jsonMode bool) (io.Reader, *Reader) {
+	if jsonMode {
+		return r, nil
+	}
+	pr := NewReader(r, total)
+	return pr, pr
+}

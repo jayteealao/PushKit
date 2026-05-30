@@ -208,6 +208,12 @@ Section "Uninstall"
   ${If} $0 == 0
     SimpleSC::StopService   "${SERVICE_NAME}" 1 30
     Pop $0
+    ${If} $0 != 0
+    ${AndIf} $0 != 1062
+      MessageBox MB_ICONEXCLAMATION \
+        "Could not stop the PushKitServer service cleanly (code $0).$\nUninstall will continue — you may need to reboot to fully remove the service." \
+        /SD IDOK
+    ${EndIf}
     SimpleSC::RemoveService "${SERVICE_NAME}"
     Pop $0
   ${EndIf}
