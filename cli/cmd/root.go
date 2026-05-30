@@ -53,9 +53,14 @@ func SetVersion(v string) {
 	rootCmd.Version = v
 }
 
-// Execute runs the root command. Exported for main.go.
+// Execute runs the root command and handles error output itself so callers
+// only need to check for non-nil to decide the exit code.
 func Execute() error {
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		outputError(err)
+	}
+	return err
 }
 
 // IsJSON reports whether the --json flag is set.
@@ -81,9 +86,33 @@ func outputError(err error) {
 }
 
 func init() {
+	// Silence Cobra's built-in error/usage printing so we control the single
+	// error-output path (outputError) and avoid double-printing in --json mode.
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+
 	rootCmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "API base URL (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API key (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output structured JSON (for scripts and AI agents)")
+}
+
+// resolveCredentials returns the effective API URL and key by applying the
+// precedence rule: config file < env vars < CLI flags. It is pure (no I/O).
+func resolveCredentials(cfgURL, cfgKey, envURL, envKey, flagURL, flagKey string) (url, key string) {
+	url, key = cfgURL, cfgKey
+	if envURL != "" {
+		url = envURL
+	}
+	if envKey != "" {
+		key = envKey
+	}
+	if flagURL != "" {
+		url = flagURL
+	}
+	if flagKey != "" {
+		key = flagKey
+	}
+	return url, key
 }
 
 func getClient() (*client.Client, error) {
@@ -93,22 +122,11 @@ func getClient() (*client.Client, error) {
 	}
 
 	// Precedence: CLI flags > env vars > config file.
-	apiURL := cfg.APIURL
-	apiKey := cfg.APIKey
-
-	if v := os.Getenv("PUSHKIT_API_URL"); v != "" {
-		apiURL = v
-	}
-	if v := os.Getenv("PUSHKIT_API_KEY"); v != "" {
-		apiKey = v
-	}
-
-	if flagAPIURL != "" {
-		apiURL = flagAPIURL
-	}
-	if flagAPIKey != "" {
-		apiKey = flagAPIKey
-	}
+	apiURL, apiKey := resolveCredentials(
+		cfg.APIURL, cfg.APIKey,
+		os.Getenv("PUSHKIT_API_URL"), os.Getenv("PUSHKIT_API_KEY"),
+		flagAPIURL, flagAPIKey,
+	)
 
 	if apiURL == "" {
 		return nil, fmt.Errorf("API URL not configured. Set PUSHKIT_API_URL or run: pushkit config set --api-url=<url>")

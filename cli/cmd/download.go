@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -69,8 +70,13 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get download URL: %w", err)
 	}
 
-	// Download from presigned URL.
-	httpResp, err := http.Get(resp.PresignedGetURL)
+	// Download from presigned URL using a client with a generous timeout for large files.
+	dlClient := &http.Client{Timeout: 10 * time.Minute}
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, resp.PresignedGetURL, nil)
+	if err != nil {
+		return fmt.Errorf("create download request: %w", err)
+	}
+	httpResp, err := dlClient.Do(dlReq)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}

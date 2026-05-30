@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 
 	"github.com/pushkit/cli/cmd"
@@ -14,12 +12,8 @@ var Version = "dev"
 func main() {
 	cmd.SetVersion(Version)
 
+	// cmd.Execute() handles all error output (JSON or plain) itself.
 	if err := cmd.Execute(); err != nil {
-		if cmd.IsJSON() {
-			b, _ := json.Marshal(map[string]string{"error": err.Error()})
-			fmt.Fprintln(os.Stderr, string(b))
-		}
-		// Cobra already prints the error in non-JSON mode.
 		os.Exit(1)
 	}
 }

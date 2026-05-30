@@ -153,7 +153,7 @@ Section "Register Windows service" SecService
     ; Service type 16 = SERVICE_WIN32_OWN_PROCESS
     ; Start type  3  = SERVICE_DEMAND_START (manual / demand)
     SimpleSC::InstallService "${SERVICE_NAME}" "${SERVICE_DISPLAY}" \
-      "16" "3" "$INSTDIR\pushkit-server.exe" "" "" ""
+      "16" "3" "$\"$INSTDIR\pushkit-server.exe$\"" "" "" ""
     Pop $0
     ${If} $0 != 0
       MessageBox MB_ICONEXCLAMATION \

@@ -110,4 +110,4 @@ To re-vendor: download the zip above, extract `SimpleSC.dll` from the archive ro
 - PyPI CLI packaging — `cli/` directory, separate packaging story.
 - Android — `android/` directory.
 - Windows code-signing — deferred to post-v0.x; the installer is unsigned and will trigger a SmartScreen warning on first run (documented in the root README's installer section).
-- Wiring `makensis` into the GitHub Actions release workflow — handled by the `release-orchestration` slice.
+- Wiring `makensis` into the GitHub Actions release workflow — handled by the release workflow (`.github/workflows/release.yml`).
