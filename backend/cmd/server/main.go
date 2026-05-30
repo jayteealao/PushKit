@@ -21,18 +21,42 @@ import (
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version = "dev"
 
-// printVersion writes "pushkit-server <v>" to w.
+// Version output format: "pushkit-server <version>\n"
+// This intentionally differs from the CLI (Cobra default: "pushkit version <version>")
+// because the server is a dependency-light service binary that uses stdlib flag rather
+// than Cobra. The divergence is documented; do not unify without weighing the added
+// dependency cost on the server binary.
 func printVersion(w io.Writer, v string) {
 	fmt.Fprintf(w, "pushkit-server %s\n", v)
 }
 
+// hasVersionFlag reports whether -v or --version appears in args without
+// invoking flag.Parse, so the version check is always safe to run first,
+// before any DB/S3 initialisation.
+func hasVersionFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-v" || a == "--v" || a == "-version" || a == "--version" {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
-	showVersion := flag.Bool("version", false, "print version and exit")
-	showVersionShort := flag.Bool("v", false, "print version and exit (alias for --version)")
-	flag.Parse()
-	if *showVersion || *showVersionShort {
+	// Version check runs before everything else (no DB/S3 side-effects).
+	if hasVersionFlag(os.Args[1:]) {
 		printVersion(os.Stdout, Version)
 		os.Exit(0)
+	}
+
+	// M-08: Use a private FlagSet with ContinueOnError so that unknown flags
+	// passed by a service manager or wrapper do NOT crash the server. The server
+	// reads all meaningful configuration from the environment; CLI args are only
+	// used for --version above. Any parse error here is logged and ignored.
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		// Unknown flags are tolerated — log at debug level and continue.
+		slog.Debug("ignoring unrecognised flags", "err", err)
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -86,10 +110,20 @@ func main() {
 		r.Mount("/v1/files", fileHandler.Routes())
 	})
 
-	slog.Info("starting server", "addr", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil {
-		slog.Error("server error", "err", err)
-		os.Exit(1)
+	// M-11: Optional TLS. When TLS_CERT_FILE and TLS_KEY_FILE are both set,
+	// start HTTPS; otherwise fall back to plain HTTP. OFF by default.
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		slog.Info("starting server (TLS)", "addr", cfg.ListenAddr)
+		if err := http.ListenAndServeTLS(cfg.ListenAddr, cfg.TLSCertFile, cfg.TLSKeyFile, r); err != nil {
+			slog.Error("server error", "err", err)
+			os.Exit(1)
+		}
+	} else {
+		slog.Info("starting server (plaintext)", "addr", cfg.ListenAddr)
+		if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil {
+			slog.Error("server error", "err", err)
+			os.Exit(1)
+		}
 	}
 }
 

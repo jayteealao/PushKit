@@ -88,15 +88,23 @@ func runDownload(cmd *cobra.Command, args []string) error {
 
 	outPath := downloadOutput
 	if outPath == "" {
-		// Try to extract filename from Content-Disposition or use fileID.
-		outPath = fileID
+		// Try to extract filename from Content-Disposition or fall back to fileID.
+		// Sanitize any server-provided name to prevent path traversal.
+		serverName := fileID
 		if cd := httpResp.Header.Get("Content-Disposition"); cd != "" {
 			if _, params, err := parseContentDisposition(cd); err == nil {
 				if fn, ok := params["filename"]; ok && fn != "" {
-					outPath = fn
+					serverName = fn
 				}
 			}
 		}
+		// Apply filepath.Base to strip any directory components from the
+		// server-provided name, then reject empty, ".", or ".." results.
+		safe := filepath.Base(serverName)
+		if safe == "" || safe == "." || safe == ".." {
+			return fmt.Errorf("server-provided filename %q is invalid or unsafe", serverName)
+		}
+		outPath = safe
 	}
 
 	outPath, err = filepath.Abs(outPath)
@@ -118,12 +126,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	size := httpResp.ContentLength
 
 	// In JSON mode, skip the progress bar — read directly from the response.
-	var body io.Reader = httpResp.Body
-	var pr *progress.Reader
-	if !flagJSON {
-		pr = progress.NewReader(httpResp.Body, size)
-		body = pr
-	}
+	body, pr := progress.MaybeNewReader(httpResp.Body, size, flagJSON)
 
 	logStderr("Downloading...\n")
 	n, err := io.Copy(f, body)

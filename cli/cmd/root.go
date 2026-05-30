@@ -20,6 +20,16 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "pushkit",
 	Short: "PushKit CLI — upload and manage files via S3",
+	// PersistentPreRunE runs before every subcommand.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// M-10: warn when --api-key is supplied on the command line because it
+		// exposes the key in the OS process list. Suppress in --json mode.
+		if cmd.Root().PersistentFlags().Changed("api-key") {
+			logStderr("Warning: --api-key is visible in the OS process list. " +
+				"Prefer the PUSHKIT_API_KEY environment variable or the config file instead.\n")
+		}
+		return nil
+	},
 	Long: `PushKit CLI — upload, list, and download files via an S3-backed API.
 
 Workflow:
