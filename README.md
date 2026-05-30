@@ -125,7 +125,7 @@ android/           Kotlin + Jetpack Compose
 
 ## Development setup
 
-**Prerequisites:** Node ≥ 20, Go ≥ 1.24, Java 17.
+**Prerequisites:** Node ≥ 22.12, Go ≥ 1.25, Java 17.
 
 **One-time setup after cloning:**
 
