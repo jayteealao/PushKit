@@ -24,7 +24,7 @@ metric-fix-decisions: 33
 metric-fix-patched: 33
 fix-rounds-run: 3
 convergence: converged
-review-owned-fix-commit: "5a8fb79, c8011d9, 21bf6c8, <pending-toolchain-fix>"
+review-owned-fix-commit: "5a8fb79, c8011d9, 21bf6c8, 0f54ca7"
 tags: [release-engineering, ci-cd, security, supply-chain, nsis, android, go]
 refs:
   index: 00-index.md
