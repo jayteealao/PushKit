@@ -28,8 +28,9 @@ func printVersion(w io.Writer, v string) {
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
+	showVersionShort := flag.Bool("v", false, "print version and exit (alias for --version)")
 	flag.Parse()
-	if *showVersion {
+	if *showVersion || *showVersionShort {
 		printVersion(os.Stdout, Version)
 		os.Exit(0)
 	}

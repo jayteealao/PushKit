@@ -21,6 +21,15 @@ func Path() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
+// legacyPath returns the old s3push config file path for back-compat reads.
+func legacyPath() (string, error) {
+	dir, err := legacyConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
+}
+
 func Load() (*Config, error) {
 	p, err := Path()
 	if err != nil {
@@ -29,7 +38,14 @@ func Load() (*Config, error) {
 
 	data, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
-		return &Config{}, nil
+		// Back-compat: fall back to the legacy ~/.config/s3push path (read-only).
+		// We never write to the legacy path; saving always uses the new pushkit path.
+		if lp, lerr := legacyPath(); lerr == nil {
+			data, err = os.ReadFile(lp)
+		}
+		if os.IsNotExist(err) {
+			return &Config{}, nil
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -64,6 +80,33 @@ func Save(cfg *Config) error {
 }
 
 func configDir() (string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Application Support", "pushkit"), nil
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			return "", fmt.Errorf("APPDATA not set")
+		}
+		return filepath.Join(appData, "pushkit"), nil
+	default: // linux and others
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "pushkit"), nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".config", "pushkit"), nil
+	}
+}
+
+// legacyConfigDir returns the old s3push config directory for back-compat reads.
+func legacyConfigDir() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		home, err := os.UserHomeDir()

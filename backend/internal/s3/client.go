@@ -20,11 +20,45 @@ import (
 	"github.com/pushkit/backend/internal/config"
 )
 
+// smithyInsertNotFoundPrefix is the prefix smithy emits when stack.Finalize.Insert
+// cannot find the named relative step. The smithy SDK (v1.x) uses plain fmt.Errorf
+// with no exported type, so we match on the stable prefix rather than a full string.
+// Source: github.com/aws/smithy-go/middleware/ordered_group.go:
+//
+//	fmt.Errorf("not found, %v", relativeTo)
+const smithyInsertNotFoundPrefix = "not found,"
+
+// stripSDKHeaders removes AWS SDK telemetry and encoding headers that break
+// SigV4 signing on S3-compatible backends (GCS, MinIO, R2):
+//
+//   - Amz-Sdk-Invocation-Id / Amz-Sdk-Request: AWS-internal telemetry not
+//     understood by non-AWS S3 implementations.
+//   - Accept-Encoding: GCS's front-end (GFE) appends ",gzip(gfe)" after
+//     signing, causing SignatureDoesNotMatch errors.
+func stripSDKHeaders(req *smithyhttp.Request) {
+	req.Header.Del("Amz-Sdk-Invocation-Id")
+	req.Header.Del("Amz-Sdk-Request")
+	req.Header.Del("Accept-Encoding")
+}
+
+// stripSDKHeadersMiddleware returns a named FinalizeMiddleware that calls
+// stripSDKHeaders before the request is signed.
+func stripSDKHeadersMiddleware() middleware.FinalizeMiddleware {
+	return middleware.FinalizeMiddlewareFunc("StripSDKHeaders",
+		func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			if req, ok := in.Request.(*smithyhttp.Request); ok {
+				stripSDKHeaders(req)
+			}
+			return next.HandleFinalize(ctx, in)
+		},
+	)
+}
+
 type Client struct {
-	s3     *s3.Client
+	s3        *s3.Client
 	presigner *s3.PresignClient
-	bucket string
-	ttl    int
+	bucket    string
+	ttl       int
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -51,28 +85,16 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 			o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 			// Strip headers that break S3-compatible signing before they're
-			// included in the SigV4 canonical request:
-			// - Amz-Sdk-Invocation-Id / Amz-Sdk-Request: AWS SDK telemetry
-			//   headers unknown to GCS/MinIO.
-			// - Accept-Encoding: GCS's front-end (GFE) appends ",gzip(gfe)"
-			//   to this header, changing its value after signing.
+			// included in the SigV4 canonical request.
 			o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
 				// Insert before Signing for normal API calls. The presign
-				// client has no "Signing" step so we silently skip there.
+				// client has no "Signing" step so smithy returns a "not found,"
+				// error; we silently skip in that case.
 				err := stack.Finalize.Insert(
-					middleware.FinalizeMiddlewareFunc("StripSDKHeaders",
-						func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
-							if req, ok := in.Request.(*smithyhttp.Request); ok {
-								req.Header.Del("Amz-Sdk-Invocation-Id")
-								req.Header.Del("Amz-Sdk-Request")
-								req.Header.Del("Accept-Encoding")
-							}
-							return next.HandleFinalize(ctx, in)
-						},
-					),
+					stripSDKHeadersMiddleware(),
 					"Signing", middleware.Before,
 				)
-				if err != nil && strings.Contains(err.Error(), "not found") {
+				if err != nil && strings.HasPrefix(err.Error(), smithyInsertNotFoundPrefix) {
 					return nil // presign pipeline — headers not needed
 				}
 				return err
@@ -125,15 +147,20 @@ func (c *Client) HeadObject(ctx context.Context, s3Key string) (bool, error) {
 		Key:    aws.String(s3Key),
 	})
 	if err != nil {
-		// Check for NotFound-style errors.
-		var nsk *types.NotFound
+		// Check typed S3 not-found errors first (AWS SDK v2 canonical path).
+		var nsk *types.NoSuchKey
 		if errors.As(err, &nsk) {
 			return false, nil
 		}
-		// aws-sdk-go-v2 may return a smithy OperationError wrapping a 404;
-		// also check for the generic "NotFound" or "NoSuchKey" in the error string
-		// as a fallback for S3-compatible backends (MinIO, R2).
-		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
+		var nf *types.NotFound
+		if errors.As(err, &nf) {
+			return false, nil
+		}
+		// S3-compatible backends (MinIO, R2, GCS) may surface a 404 wrapped
+		// in a smithy ResponseError rather than a typed S3 error. Inspect the
+		// HTTP status code directly so we don't rely on error strings.
+		var re *smithyhttp.ResponseError
+		if errors.As(err, &re) && re.HTTPStatusCode() == 404 {
 			return false, nil
 		}
 		return false, fmt.Errorf("head object %s: %w", s3Key, err)
