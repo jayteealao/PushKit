@@ -50,14 +50,20 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       stripped: ${{ steps.ver.outputs.stripped }}
+      pep440: ${{ steps.ver.outputs.pep440 }}
     steps:
       - name: Compute version outputs
         id: ver
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
+          STRIPPED="${REF_NAME#v}"
+          # PEP 440 normalization for the Python wheel only: -rc.N -> rcN, -alpha.N -> aN, -beta.N -> bN.
+          # Wheel filenames use '-' as a field separator, so the prerelease suffix must contain no '-' or '.'.
+          PEP440="$(printf '%s' "$STRIPPED" | sed -E 's/-rc\.([0-9]+)$/rc\1/; s/-alpha\.([0-9]+)$/a\1/; s/-beta\.([0-9]+)$/b\1/')"
           echo "version=${REF_NAME}" >> "$GITHUB_OUTPUT"
-          echo "stripped=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "stripped=${STRIPPED}" >> "$GITHUB_OUTPUT"
+          echo "pep440=${PEP440}" >> "$GITHUB_OUTPUT"
 
   retest-backend:
     needs: [version]
@@ -124,10 +130,12 @@ jobs:
 
       - name: Build wheel
         # M-15: version consumed from the canonical version job output.
-        # M-18: value moved into env block; shell references $STRIPPED not an expression.
+        # M-18: value moved into env block; shell references $PEP440 not an expression.
+        # Python wheels require the PEP 440-normalized version (e.g. 0.1.0rc1), not the
+        # tag's -rc.N form, or PyPI rejects the wheel filename.
         env:
-          STRIPPED: ${{ needs.version.outputs.stripped }}
-        run: make build-wheels VERSION="$STRIPPED"
+          PEP440: ${{ needs.version.outputs.pep440 }}
+        run: make build-wheels VERSION="$PEP440"
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
