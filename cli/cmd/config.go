@@ -14,9 +14,9 @@ var configCmd = &cobra.Command{
 	Long: `View and update PushKit CLI configuration.
 
 Configuration is stored in a JSON file at a platform-specific location:
-  macOS:   ~/Library/Application Support/s3push/config.json
-  Linux:   $XDG_CONFIG_HOME/s3push/config.json (or ~/.config/s3push/)
-  Windows: %APPDATA%\s3push\config.json
+  macOS:   ~/Library/Application Support/pushkit/config.json
+  Linux:   $XDG_CONFIG_HOME/pushkit/config.json (or ~/.config/pushkit/)
+  Windows: %APPDATA%\pushkit\config.json
 
 Subcommands:
   set    Save API URL and/or API key
