@@ -6,7 +6,7 @@ This file is the reference for maintainers building or modifying the Windows ins
 
 - **NSIS 3.12 or later** (CVE-2025-43715 was fixed in 3.11; 3.12 adds a second elevation fix).  
   Install from the official NSIS installer; `makensis.exe` ends up at `%PROGRAMFILES(X86)%\NSIS\makensis.exe`.
-- **Go toolchain** matching `backend/go.mod` (1.24). Required to build the input binary.
+- **Go 1.25.** Declared in `backend/go.mod` and used by CI to build every release binary. Required to build the input binary.
 - **Windows 11** (or Windows Server 2022 for CI). The installer itself targets any 64-bit Windows ≥ 10.
 
 ## Required defines
@@ -39,6 +39,11 @@ Because `SecService` is **default-checked**, a silent install (`/S`) **will** re
 ## Local validation steps
 
 Run from the **repository root**:
+
+> **Note:** this local build omits the version `-ldflags` that CI uses, so the
+> resulting `pushkit-server.exe --version` prints the default (`dev`). To mirror
+> the release binary, add `-ldflags "-X main.Version=<version>"`. See
+> [How CI builds the installer](#how-ci-builds-the-installer) below.
 
 ```powershell
 # 1. Build the binary
@@ -104,6 +109,23 @@ Get-Item backend\installer\pushkit-server-setup.exe | Select-Object Length
 | Last release | 2021-05-02 |
 
 To re-vendor: download the zip above, extract `SimpleSC.dll` from the archive root (the Unicode-only zip has the DLL at root level), replace `plugins/SimpleSC.dll`, update the SHA-256 in this table.
+
+## How CI builds the installer
+
+The installer is produced by two chained jobs in `.github/workflows/release.yml`:
+
+1. **`build-backend-binary`** (Linux) cross-compiles the server with
+   `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` and
+   `-ldflags "-X main.Version=<version>"`, baking the release version into the
+   binary, then uploads `pushkit-server.exe` as an artifact.
+2. **`build-backend-installer`** (`windows-2022`) downloads that artifact,
+   installs NSIS 3.12, verifies the bundled `SimpleSC.dll` SHA-256 against the
+   value in the [Vendored plugin](#vendored-plugin) table, and runs
+   `makensis /DVERSION=<version>`.
+
+So the `.exe` that ships is always cross-compiled on Linux with its version
+injected at link time — the local build command above is for installer-logic
+testing only, not for producing a release artifact.
 
 ## Out of scope
 

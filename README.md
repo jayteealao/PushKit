@@ -2,9 +2,15 @@
 
 [![Latest release](https://img.shields.io/github/v/release/jayteealao/PushKit?include_prereleases&sort=semver)](https://github.com/jayteealao/PushKit/releases/latest)
 
-Upload files from CLI, download them on Android. All via pre-signed S3 URLs through a backend broker.
+Upload files from the CLI, download them on Android. All via pre-signed S3 URLs through a backend broker.
 
-See [Releasing](#releasing) and [Backend installer](#backend-installer) for tagging the next version and installing the Windows server build.
+PushKit has three components, each with its own guide:
+
+- **[CLI](cli/README.md)** — `pushkit` command-line client (published to PyPI).
+- **[Backend](backend/README.md)** — Go API server; how to run it locally and install the packaged Windows server.
+- **[Releasing](RELEASING.md)** — maintainer runbook for cutting a tagged release.
+
+Contributing? See **[CONTRIBUTING.md](CONTRIBUTING.md)** for commit conventions and the test gates.
 
 ## Architecture
 
@@ -25,9 +31,9 @@ cd backend
 docker compose up --build
 ```
 
-This starts the API server on `:8000` and MinIO (S3-compatible) on `:9000`.
+This starts the API server on `:8000` and MinIO (S3-compatible) on `:9000` (web console on `:9001`).
 
-Default API keys: `dev-key-1` (user1), `dev-key-2` (user2).
+Default API keys: `dev-key-1` (user1), `dev-key-2` (user2). Full backend setup is in the [backend guide](backend/README.md).
 
 ### 2. Configure and use the CLI
 
@@ -35,7 +41,7 @@ Default API keys: `dev-key-1` (user1), `dev-key-2` (user2).
 cd cli
 go build -o pushkit .
 
-# Set config (stored in ~/.config/pushkit)
+# Set config (stored at ~/.config/pushkit on Linux; see the CLI guide for macOS/Windows paths)
 ./pushkit config set --api-url=http://localhost:8000 --api-key=dev-key-1
 
 # Upload a file
@@ -48,24 +54,28 @@ go build -o pushkit .
 ./pushkit download <file-id> --out report.pdf
 ```
 
+The CLI has more commands and flags (tags, integrity checks, JSON output, pagination) — see the [CLI guide](cli/README.md).
+
 ### 3. Configure the Android app
 
-1. Open the `android/` project in Android Studio
-2. Build and run on device/emulator
-3. In Settings, enter the API URL (e.g., `http://10.0.2.2:8000` for emulator) and API key
-4. File list shows uploaded files; tap to download
+1. Open the `android/` project in Android Studio.
+2. Build and run on a device/emulator.
+3. In Settings, enter the API URL (e.g., `http://10.0.2.2:8000` for the emulator) and an API key.
+4. The file list shows uploaded files; tap to download.
+
+App architecture and the build/version-override workflow are in [android/README.md](android/README.md).
 
 ## API Endpoints
 
-All endpoints require `X-API-Key` header.
+All `/v1` endpoints require an `X-API-Key` header.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/v1/uploads/init` | Get presigned PUT URL for upload |
 | POST | `/v1/uploads/complete` | Mark upload as complete |
 | GET | `/v1/files` | List files (cursor pagination, search, sort) |
-| GET | `/v1/files/{id}/download` | Get presigned GET URL for download |
-| DELETE | `/v1/files/{id}` | Delete file |
+| GET | `/v1/files/{fileId}/download` | Get presigned GET URL for download |
+| DELETE | `/v1/files/{fileId}` | Delete file |
 | GET | `/health` | Health check (no auth) |
 
 ### Example: upload via curl
@@ -98,24 +108,29 @@ curl http://localhost:8000/v1/files \
 | Env Var | Required | Description |
 |---------|----------|-------------|
 | `S3_BUCKET` | Yes | S3 bucket name |
-| `AWS_REGION` | No | AWS region (default: us-east-1) |
 | `AWS_ACCESS_KEY_ID` | Yes | AWS access key |
 | `AWS_SECRET_ACCESS_KEY` | Yes | AWS secret key |
+| `API_KEYS` | Yes | Comma-separated `key:user` pairs |
+| `AWS_REGION` | No | AWS region (default: `us-east-1`) |
 | `S3_ENDPOINT_URL` | No | S3-compatible endpoint (MinIO, R2) |
-| `API_KEYS` | Yes | Comma-separated key:user pairs |
-| `DATABASE_URL` | No | SQLite path (default: pushkit.db) |
-| `LISTEN_ADDR` | No | Listen address (default: :8000) |
+| `DATABASE_URL` | No | SQLite path (default: `pushkit.db`) |
+| `LISTEN_ADDR` | No | Listen address (default: `:8000`) |
+| `TLS_CERT_FILE` | No | TLS certificate path; enables HTTPS when set together with `TLS_KEY_FILE` |
+| `TLS_KEY_FILE` | No | TLS private-key path; enables HTTPS when set together with `TLS_CERT_FILE` |
+
+See the [backend guide](backend/README.md) for run-local instructions and S3-vs-MinIO setup.
 
 ## Project Structure
 
 ```
 backend/           Go API server (Chi + SQLite + aws-sdk-go-v2)
   cmd/server/      Entry point
-  internal/        API handlers, auth, DB, S3, models
+  internal/        api, auth, config, db, models, s3
+  installer/       NSIS Windows installer
   Dockerfile
   docker-compose.yml
 
-cli/               Go CLI (Cobra)
+cli/               Go CLI (Cobra), published to PyPI as `pushkit`
   cmd/             Command definitions
   internal/        HTTP client, config, progress bar
 
@@ -125,7 +140,7 @@ android/           Kotlin + Jetpack Compose
 
 ## Development setup
 
-**Prerequisites:** Node ≥ 22.12, Go ≥ 1.25, Java 17.
+**Prerequisites:** Node ≥ 22.12, Go 1.25, Java 17.
 
 **One-time setup after cloning:**
 
@@ -139,7 +154,7 @@ This wires a `commit-msg` hook that enforces [Conventional Commits](https://www.
 
 Example: `feat(cli): add --dry-run flag` or `fix(backend): handle empty file list`.
 
-Using `--no-verify` bypasses the local hook but the `commitlint-backstop` CI job will catch it on the PR.
+Using `--no-verify` bypasses the local hook, but the `commitlint-backstop` CI job will catch it on the PR. Full contributor guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Testing
 
@@ -149,115 +164,15 @@ cd backend && go test ./...
 
 # CLI
 cd cli && go test ./...
+
+# Android
+cd android && ./gradlew assembleDebug lint testDebugUnitTest
 ```
 
 ## Releasing
 
-PushKit ships via a tag-and-walk-away pipeline. Pushing a `v*` tag from `main` triggers the full release workflow; no other manual steps are required.
+Releases are tag-driven: pushing a `v*` tag from `main` runs the full pipeline (PyPI wheel, Windows installer, Android APK, GitHub Release) with no other manual steps. The maintainer runbook — cutting a tag, the pipeline overview, rollback, and the PyPI OIDC break-glass procedure — is in **[RELEASING.md](RELEASING.md)**.
 
-### Cutting a release
+## Running the server on Windows
 
-```bash
-git tag -a v0.1.0-rc.1 -m ""
-git push origin v0.1.0-rc.1
-```
-
-That is the only manual action. The release workflow (`.github/workflows/release.yml`) runs automatically and produces:
-
-- **PyPI:** `pushkit==0.1.0rc1` published via OIDC Trusted Publishing (PEP 440 normalised). Note that git tag `v0.1.0-rc.1` maps to wheel version `0.1.0rc1`; install it with:
-  ```
-  pip install --pre pushkit==0.1.0rc1
-  ```
-- **GitHub Release:** marked as prerelease for `-rc`/`-alpha`/`-beta` tags. Assets: `pushkit-server-setup.exe` (Windows installer), `pushkit-android.apk` (Android debug APK), `SHA256SUMS` (asset integrity verification). Release notes are generated by `git-cliff` from Conventional Commits.
-
-### Pipeline overview
-
-1. `tag-guard` — refuses tags not reachable from `origin/main`.
-2. `retest-{backend,cli,android}` — re-runs the pre-merge CI gates against the tagged commit.
-3. `build-cli-wheel` (Linux) — `make build-wheels VERSION=<tag-without-v>`.
-4. `build-backend-binary` (Linux) — cross-compiles `pushkit-server.exe` with `-ldflags "-X main.Version=<tag-without-v>"`.
-5. `build-backend-installer` (Windows) — installs NSIS 3.12, runs `makensis /DVERSION=<tag-without-v>`.
-6. `build-android-apk` (Linux) — sets `versionCode = git rev-list --first-parent --count HEAD` and `versionName = <tag-without-v>`, builds debug APK.
-7. `generate-changelog` (Linux) — `git-cliff --unreleased --tag <tag>` against full history.
-8. `publish-pypi` (Linux) — OIDC publish via `pypa/gh-action-pypi-publish@release/v1` (`attestations: false`).
-9. `create-github-release` (Linux) — `softprops/action-gh-release@v3` uploads the installer, APK, and `SHA256SUMS`; release notes from the generated changelog.
-10. `post-publish-linux` + `post-publish-windows` — `pip install --pre`, `aapt dump badging`, `sha256sum -c SHA256SUMS`, silent install + `--version`.
-
-Target wall time: ≤ 15 minutes for the first release.
-
-### Watching the run
-
-```bash
-gh run watch --repo jayteealao/PushKit
-```
-
-### Rollback
-
-Once a tag is published it is final. We do not re-run `release.yml` on the same tag.
-
-If a release ships with a bug:
-
-1. **Yank the wheel from PyPI.** Sign in to PyPI and mark the version yanked. Yanking blocks new resolutions of that exact version but keeps pinned installs working.
-2. **Cut a new release tag** at the fix commit (for example `v0.1.0-rc.2`). The full pipeline runs again.
-3. **The original GitHub Release stays** — delete its assets manually via the web UI or `gh release delete-asset` if needed. The tag itself stays in git history.
-
-### Required GitHub repo settings (one-time, manual)
-
-These are configured outside CI; document for future maintainers:
-
-1. **PyPI Trusted Publisher:** owner `jayteealao`, repository `PushKit`, workflow filename `release.yml`, environment `pypi`. Configure under PyPI → Account settings → Publishing.
-2. **Tag-protection rule:** restrict `v*` tag creation to maintainers via Settings → Rules → Rulesets. The `tag-guard` job is a CI-level backstop; this is the GitHub-level guard.
-3. **`PYPI_API_TOKEN` repository secret** (break-glass only): a PyPI API token scoped to the `pushkit` project. The default publish path is OIDC; this secret only exists for the OIDC-outage recovery path below.
-
-### Break-glass: PyPI OIDC outage
-
-If `pypa/gh-action-pypi-publish` cannot acquire an OIDC token (PyPI-side outage, clock skew, environment misconfig), temporarily swap the `publish-pypi` step in `release.yml`:
-
-```yaml
-- uses: pypa/gh-action-pypi-publish@release/v1
-  with:
-    packages-dir: dist/
-    password: ${{ secrets.PYPI_API_TOKEN }}   # break-glass only
-    attestations: false
-```
-
-Push the tag again with a bumped `-rc.N+1`. **Revert this change** before merging the next normal release PR — the default path is OIDC.
-
-## Backend installer
-
-The Windows installer (`pushkit-server-setup.exe`) is distributed via GitHub Releases.
-
-### Download
-
-- Latest stable: <https://github.com/jayteealao/PushKit/releases/latest>
-- Including prereleases: <https://github.com/jayteealao/PushKit/releases>
-
-### Install
-
-**Interactive (UAC prompt):**
-
-```powershell
-.\pushkit-server-setup.exe
-```
-
-Default components install `pushkit-server.exe` to `%ProgramFiles%\PushKit\`, add a Start Menu shortcut, and register an Apps & Features entry. The Windows service component (default-checked) registers `PushKitServer` as a manual-start service via the bundled NSIS SimpleSC plugin. You can manage the service afterward with `sc.exe` or Services.msc.
-
-**Silent:**
-
-```powershell
-.\pushkit-server-setup.exe /S
-```
-
-Silent install applies all default-checked components, including the Windows service. The installer requires elevation (`RequestExecutionLevel admin`); UAC will prompt non-interactively if the shell is not already elevated.
-
-### Uninstall
-
-Settings → Apps & Features → **PushKit Server** → Uninstall. Or silently:
-
-```powershell
-& "$env:ProgramFiles\PushKit\uninstall.exe" /S
-```
-
-### SmartScreen warning
-
-The installer is not code-signed (out of scope for the v0.x line). On first launch Windows SmartScreen displays "Unknown publisher". Click **More info** → **Run anyway** to proceed. Code-signing is on the roadmap for a future release.
+A signed-on-the-roadmap Windows installer (`pushkit-server-setup.exe`) is published with each release. Download, install, and uninstall instructions are in the [backend guide](backend/README.md#windows-installer-end-users).

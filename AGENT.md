@@ -3,7 +3,7 @@
 Start: say hi. One motivating line. Then work.
 
 ## Owner / contact
-- Owner: <FILL ME> (name, handle, email).
+- Owner: jayteealao (GitHub @jayteealao, jayteealao@gmail.com).
 - Escalate on: prod incidents, security issues, secrets, signing/release keys, CI failures that block shipping.
 
 ## Style goals (always)
@@ -29,12 +29,13 @@ Start: say hi. One motivating line. Then work.
 
 ## Workflow
 - No git worktrees unless user asks.
-  - If asked: `peakypanes-worktress/<worktree-name>/`
+  - If asked: `pushkit-worktrees/<worktree-name>/`
 - Safe git by default:
   - OK: `git status`, `git diff`, `git log`, `git show`.
   - No destructive ops unless explicitly requested (`reset --hard`, `clean`, `restore`, `rm`, …).
   - No amend unless asked.
 - Small commits. Reviewable diffs. No repo-wide reformat.
+- Commits follow Conventional Commits (`type(scope): description`); see CONTRIBUTING.md for the scope vocabulary and commit-hook setup.
 
 ## Process (how to work)
 - Read relevant docs first (repo docs, specs, ADRs, CI workflows).
