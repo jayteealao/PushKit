@@ -4,3 +4,6 @@ dist/
 # NSIS installer build outputs
 backend/installer/pushkit-server-setup.exe
 backend/pushkit-server.exe
+
+# SDLC workflow artifacts (local tooling, not part of the product)
+.ai/
