@@ -15,6 +15,12 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   minio:
     image: minio/minio:latest
