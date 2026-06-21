@@ -20,14 +20,6 @@ import (
 	"github.com/pushkit/backend/internal/config"
 )
 
-// smithyInsertNotFoundPrefix is the prefix smithy emits when stack.Finalize.Insert
-// cannot find the named relative step. The smithy SDK (v1.x) uses plain fmt.Errorf
-// with no exported type, so we match on the stable prefix rather than a full string.
-// Source: github.com/aws/smithy-go/middleware/ordered_group.go:
-//
-//	fmt.Errorf("not found, %v", relativeTo)
-const smithyInsertNotFoundPrefix = "not found,"
-
 // stripSDKHeaders removes AWS SDK telemetry and encoding headers that break
 // SigV4 signing on S3-compatible backends (GCS, MinIO, R2):
 //
@@ -87,17 +79,19 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			// Strip headers that break S3-compatible signing before they're
 			// included in the SigV4 canonical request.
 			o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
-				// Insert before Signing for normal API calls. The presign
-				// client has no "Signing" step so smithy returns a "not found,"
-				// error; we silently skip in that case.
-				err := stack.Finalize.Insert(
-					stripSDKHeadersMiddleware(),
-					"Signing", middleware.Before,
-				)
-				if err != nil && strings.HasPrefix(err.Error(), smithyInsertNotFoundPrefix) {
-					return nil // presign pipeline — headers not needed
-				}
-				return err
+				// Add the strip middleware to the head of the Finalize step.
+				// Unlike Insert, Add is not coupled to an internal step ID, so it
+				// runs on BOTH the normal API pipeline (which has a "Signing"
+				// step) and the presign pipeline (which has none). The presign
+				// path MUST strip too: these headers are injected in the earlier
+				// Build step, so left in place they land in the presigned URL's
+				// X-Amz-SignedHeaders, and any non-SDK client (Android, curl, the
+				// MCP CLI) that later PUTs to that URL fails with
+				// SignatureDoesNotMatch. Head-of-Finalize is before signing in
+				// both pipelines because the headers come from Build and are not
+				// re-added within Finalize. Add only errors on a duplicate ID, so
+				// propagate that rather than swallow it.
+				return stack.Finalize.Add(stripSDKHeadersMiddleware(), middleware.Before)
 			})
 		})
 	}
