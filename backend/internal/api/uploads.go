@@ -12,6 +12,7 @@ import (
 
 	"github.com/pushkit/backend/internal/auth"
 	"github.com/pushkit/backend/internal/db"
+	"github.com/pushkit/backend/internal/events"
 	"github.com/pushkit/backend/internal/models"
 	s3client "github.com/pushkit/backend/internal/s3"
 )
@@ -19,6 +20,9 @@ import (
 type UploadHandler struct {
 	DB *sql.DB
 	S3 *s3client.Client
+	// Events publishes file lifecycle events to subscribers. Optional: when nil,
+	// publishing is skipped so the upload path is unaffected.
+	Events events.Publisher
 }
 
 func (h *UploadHandler) Routes() chi.Router {
@@ -162,5 +166,20 @@ func (h *UploadHandler) completeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("upload completed", "user_id", userID, "file_id", req.FileID)
+
+	// Publish a best-effort file.uploaded event after the status update succeeds.
+	// Publish is non-blocking and never errors, so a missing subscriber or full
+	// buffer cannot delay or fail the upload response.
+	if h.Events != nil {
+		h.Events.Publish(userID, events.Event{
+			Type:        "file.uploaded",
+			FileID:      updated.ID,
+			Filename:    updated.OriginalFilename,
+			Size:        updated.SizeBytes,
+			ContentType: updated.ContentType,
+			CreatedAt:   updated.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+
 	writeJSON(w, http.StatusOK, models.FileRecordToResponse(updated))
 }

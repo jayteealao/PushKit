@@ -15,6 +15,7 @@ import (
 	"github.com/pushkit/backend/internal/auth"
 	"github.com/pushkit/backend/internal/config"
 	"github.com/pushkit/backend/internal/db"
+	"github.com/pushkit/backend/internal/events"
 	s3client "github.com/pushkit/backend/internal/s3"
 )
 
@@ -86,7 +87,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	uploadHandler := &api.UploadHandler{DB: database, S3: s3}
+	// In-process event hub for the SSE stream; holds no background goroutine.
+	hub := events.NewHub()
+
+	uploadHandler := &api.UploadHandler{DB: database, S3: s3, Events: hub}
 	fileHandler := &api.FileHandler{DB: database, S3: s3}
 
 	r := chi.NewRouter()
@@ -108,6 +112,7 @@ func main() {
 		r.Use(auth.Middleware(cfg))
 		r.Mount("/v1/uploads", uploadHandler.Routes())
 		r.Mount("/v1/files", fileHandler.Routes())
+		r.Handle("/v1/events", &events.Handler{Hub: hub})
 	})
 
 	// M-11: Optional TLS. When TLS_CERT_FILE and TLS_KEY_FILE are both set,
