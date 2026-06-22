@@ -43,10 +43,40 @@ func hasVersionFlag(args []string) bool {
 	return false
 }
 
+// hasDBCheckFlag reports whether --db-check appears in args.
+// When present, the server opens its SQLite database and exits without
+// starting the HTTP listener or loading the S3/API-key configuration.
+// This is used as a CI smoke-test hook to verify that the binary was
+// compiled with cgo enabled (a CGO_ENABLED=0 stub panics on DB open).
+func hasDBCheckFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--db-check" {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	// Version check runs before everything else (no DB/S3 side-effects).
 	if hasVersionFlag(os.Args[1:]) {
 		printVersion(os.Stdout, Version)
+		os.Exit(0)
+	}
+
+	// DB-check flag: open SQLite and exit. Used by CI to verify cgo is enabled.
+	if hasDBCheckFlag(os.Args[1:]) {
+		dsn := os.Getenv("DATABASE_URL")
+		if dsn == "" {
+			dsn = "pushkit-smoke.db"
+		}
+		database, err := db.Open(dsn)
+		if err != nil {
+			slog.Error("db-check: open database", "err", err)
+			os.Exit(1)
+		}
+		database.Close()
+		fmt.Fprintln(os.Stdout, "db-check: ok")
 		os.Exit(0)
 	}
 

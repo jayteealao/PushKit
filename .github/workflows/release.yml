@@ -157,19 +157,33 @@ jobs:
         with:
           go-version: "1.25.11"
 
+      - name: Install mingw-w64 cross-compiler
+        run: sudo apt-get install -y gcc-mingw-w64-x86-64
+
       - name: Cross-compile pushkit-server.exe
         # M-15 + M-18: version from canonical job; injected via env, not expression interpolation.
+        # CGO_ENABLED=1 with mingw-w64: required for mattn/go-sqlite3 (cgo driver).
+        # -extldflags "-static": links libgcc/libwinpthread statically; binary requires only system DLLs.
         env:
           GOOS: windows
           GOARCH: amd64
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
           STRIPPED: ${{ needs.version.outputs.stripped }}
         run: |
           go build \
-            -ldflags "-X main.Version=$STRIPPED" \
+            -ldflags "-X main.Version=$STRIPPED -extldflags \"-static\"" \
             -o pushkit-server.exe \
             ./cmd/server
         working-directory: backend
+
+      - name: Verify no unexpected DLL dependencies
+        run: |
+          x86_64-w64-mingw32-objdump -p backend/pushkit-server.exe \
+            | grep "DLL Name:" \
+            | grep -Eiv "KERNEL32|ntdll|ADVAPI32|WS2_32|msvcrt|SHELL32|USER32|ole32" \
+            && { echo "Unexpected DLL dependency found"; exit 1; } || true
 
       - name: Upload backend binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -509,7 +523,7 @@ jobs:
             exit $proc.ExitCode
           }
 
-      - name: Smoke-test pushkit-server --version (AC7)
+      - name: Smoke-test --version (AC7 — version correctness)
         shell: pwsh
         run: |
           $exe = Join-Path $env:ProgramFiles "PushKit\pushkit-server.exe"
@@ -524,4 +538,17 @@ jobs:
           if ($actual -ne $expected) {
             Write-Error "Smoke-test mismatch"
             exit 1
+          }
+
+      - name: DB-open smoke-test (AC7 — detects CGO_ENABLED=0 stub)
+        shell: pwsh
+        env:
+          DATABASE_URL: ${{ runner.temp }}\pushkit-smoke.db
+        run: |
+          $exe = Join-Path $env:ProgramFiles "PushKit\pushkit-server.exe"
+          $result = (& $exe --db-check | Out-String).Trim()
+          Write-Host "DB-check result: $result"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "DB-open smoke-test failed (exit $LASTEXITCODE) — binary may have been compiled without cgo"
+            exit $LASTEXITCODE
           }
