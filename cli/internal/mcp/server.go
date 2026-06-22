@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -47,12 +48,20 @@ type Options struct {
 	APIKey   string // for the pre-call auth guard only
 	State    *State
 	StateDir string
+	BaseURL  string // backend base URL; enables the live event subscription when set with APIKey
 	Version  string
 }
 
-// Server wraps the MCP server and its stdio run loop.
+// Server wraps the MCP server and its stdio run loop, plus the live-refresh
+// machinery: each backend file is exposed as a read-only pushkit://files/{id}
+// resource, and a background subscriber to GET /v1/events keeps that set in sync.
 type Server struct {
-	mcp *mcp.Server
+	mcp     *mcp.Server
+	h       *handlers
+	baseURL string
+
+	mu         sync.Mutex
+	registered map[string]struct{} // file IDs currently exposed as concrete resources
 }
 
 // New constructs the pushkit MCP server with the four file tools registered. It
@@ -77,7 +86,18 @@ func New(opts Options) *Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "pushkit_list", Description: listDescription}, h.list)
 	mcp.AddTool(s, &mcp.Tool{Name: "pushkit_delete", Description: deleteDescription}, h.delete)
 
-	return &Server{mcp: s}
+	srv := &Server{
+		mcp:        s,
+		h:          h,
+		baseURL:    opts.BaseURL,
+		registered: map[string]struct{}{},
+	}
+	// Register the resource template up front: it advertises the resources
+	// capability (with listChanged) from startup and resolves direct-URI reads for
+	// files not currently in the concrete list. Concrete per-file resources are
+	// added by the event subscriber's reconcile.
+	srv.registerResourceTemplate()
+	return srv
 }
 
 // NewForClient builds a Server wired to a real backend client, loading the
@@ -95,14 +115,30 @@ func NewForClient(c apiClient, apiKey, baseURL, version string) *Server {
 		APIKey:   apiKey,
 		State:    LoadState(dir, baseURL),
 		StateDir: dir,
+		BaseURL:  baseURL,
 		Version:  version,
 	})
 }
 
 // Run serves the MCP protocol over the given transport (stdio in production)
-// until the client disconnects or ctx is cancelled.
+// until the client disconnects or ctx is cancelled. When credentials and a base
+// URL are configured it also starts a best-effort background subscriber that
+// keeps the file resources live; the subscriber is bound to Run's lifetime and
+// never blocks the protocol loop or fails server startup.
 func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
+	if s.subscriberEnabled() {
+		subCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go s.runSubscriber(subCtx)
+	}
 	return s.mcp.Run(ctx, t)
+}
+
+// subscriberEnabled reports whether the live event subscription can run: it needs
+// both an API key and a base URL. Without them the server still starts and serves
+// tools and the resource template (start-and-error), just without live refresh.
+func (s *Server) subscriberEnabled() bool {
+	return s.h != nil && s.h.apiKey != "" && s.baseURL != ""
 }
 
 // requireKey returns a clear tool error when no API key is configured. Tool
