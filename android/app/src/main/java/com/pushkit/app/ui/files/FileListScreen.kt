@@ -1,6 +1,12 @@
 package com.pushkit.app.ui.files
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.text.format.Formatter
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
@@ -26,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.pushkit.app.data.model.FileItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,8 +72,25 @@ fun FileListScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var showSourceMenu by remember { mutableStateOf(false) }
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.enqueueUpload(it, context) } }
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri -> uri?.let { viewModel.enqueueUpload(it, context) } }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* The foreground upload runs regardless; this just lets its notification show. */ }
+
     LaunchedEffect(state.downloadMessage) {
         state.downloadMessage?.let {
+            snackbarHostState.showSnackbar(it)
+        }
+    }
+
+    LaunchedEffect(state.uploadMessage) {
+        state.uploadMessage?.let {
             snackbarHostState.showSnackbar(it)
         }
     }
@@ -97,7 +123,47 @@ fun FileListScreen(
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            Box {
+                FloatingActionButton(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        showSourceMenu = true
+                    }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Upload file")
+                }
+                DropdownMenu(
+                    expanded = showSourceMenu,
+                    onDismissRequest = { showSourceMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Upload a file") },
+                        onClick = {
+                            showSourceMenu = false
+                            openDocumentLauncher.launch(arrayOf("*/*"))
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Upload a photo or video") },
+                        onClick = {
+                            showSourceMenu = false
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                            )
+                        }
+                    )
+                }
+            }
+        }
     ) { padding ->
         Column(
             modifier = Modifier

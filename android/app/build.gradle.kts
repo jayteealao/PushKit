@@ -47,6 +47,12 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -81,4 +87,17 @@ dependencies {
 
     // Core
     implementation("androidx.core:core-ktx:1.12.0")
+
+    // Background upload (WorkManager). 2.9.1 is the latest line compatible with compileSdk 34 /
+    // AGP 8.2.2; the 2.10+ line requires compileSdk 35 (and AGP 8.6+).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
+
+    // Unit tests
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    testImplementation("androidx.test:core:1.5.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("androidx.work:work-testing:2.9.1")
 }

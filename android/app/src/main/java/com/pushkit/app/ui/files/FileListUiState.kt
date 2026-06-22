@@ -12,5 +12,7 @@ data class FileListUiState(
     val sortField: String = "created_at",
     val sortOrder: String = "desc",
     val hasMore: Boolean = false,
-    val downloadMessage: String? = null
+    val downloadMessage: String? = null,
+    val isUploading: Boolean = false,
+    val uploadMessage: String? = null
 )
