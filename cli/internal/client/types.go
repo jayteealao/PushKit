@@ -3,7 +3,7 @@ package client
 type UploadInitRequest struct {
 	Filename    string  `json:"filename"`
 	ContentType string  `json:"contentType"`
-	SizeBytes   int64   `json:"sizeBytes"`
+	SizeBytes   *int64  `json:"sizeBytes,omitempty"`
 	SHA256      *string `json:"sha256,omitempty"`
 }
 
@@ -17,7 +17,7 @@ type UploadInitResponse struct {
 
 type UploadCompleteRequest struct {
 	FileID    string            `json:"fileId"`
-	SizeBytes int64             `json:"sizeBytes"`
+	SizeBytes *int64            `json:"sizeBytes,omitempty"`
 	SHA256    *string           `json:"sha256,omitempty"`
 	Tags      map[string]string `json:"tags,omitempty"`
 }

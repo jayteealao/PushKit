@@ -23,11 +23,12 @@ const (
 	resourceHost   = "files"
 )
 
-// maxResourceBytes caps how many bytes a single resource read embeds inline. Over
-// the cap the read returns the file's metadata plus its download URL instead of
-// the bytes, so an @-mention of a large file never blows the MCP output budget.
+// maxInlineResourceBytes caps how many bytes a single resource read embeds inline
+// (i.e. the threshold for inlining the file body vs. returning metadata only).
+// Over the cap the read returns file metadata with an instruction to pull the
+// file by ID; the presigned S3 URL is never returned to the MCP client.
 // It is a var (not a const) so tests can shrink it.
-var maxResourceBytes int64 = 10 << 20 // 10 MiB
+var maxInlineResourceBytes int64 = 10 << 20 // 10 MiB
 
 // fileURI builds the canonical resource URI for a file ID.
 func fileURI(id string) string {
@@ -115,6 +116,13 @@ func resourceDescription(f client.FileResponse) string {
 // and each change makes the SDK emit resources/list_changed. This is the single
 // refresh primitive — run on (re)connect and on each non-echo file.uploaded — and
 // it needs no missed-event replay because it always reflects the current list.
+//
+// Lock ordering: s.mu is held across the SDK AddResource / RemoveResources calls.
+// This is safe because the SDK resource-read callbacks (readFileResource) call
+// only s.h.* methods (client I/O) and never re-enter s.mu. No SDK callback
+// acquires s.mu, so there is no lock-cycle risk. If a future SDK callback ever
+// needs s.mu, narrow this critical section to guard only s.registered mutations
+// and perform the SDK calls outside the lock using a diff snapshot.
 func (s *Server) reconcileResources(ctx context.Context) error {
 	files, err := s.h.listAll(ctx)
 	if err != nil {
@@ -174,14 +182,14 @@ func (s *Server) readFileResource(ctx context.Context, req *mcp.ReadResourceRequ
 
 	// Read one byte past the cap so an over-cap file is detected without buffering
 	// the whole thing.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResourceBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxInlineResourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read resource: %w", err)
 	}
 	contentType := resp.Header.Get("Content-Type")
 
-	if int64(len(data)) > maxResourceBytes {
-		return oversizeResult(uri, id, contentType, dl.PresignedGetURL), nil
+	if int64(len(data)) > maxInlineResourceBytes {
+		return oversizeResult(uri, id, contentType), nil
 	}
 	if isTextual(contentType) && utf8.Valid(data) {
 		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
@@ -197,14 +205,15 @@ func (s *Server) readFileResource(ctx context.Context, req *mcp.ReadResourceRequ
 	}}}, nil
 }
 
-// oversizeResult is returned when a file exceeds the inline cap: the agent gets
-// the file's identity and a download URL instead of the bytes.
-func oversizeResult(uri, id, contentType, downloadURL string) *mcp.ReadResourceResult {
+// oversizeResult is returned when a file exceeds the inline cap. The presigned
+// S3 URL is intentionally omitted — self-authenticating credentials must not
+// appear in MCP output, LLM context, or logs. The agent is instructed to pull
+// the file by ID using the pushkit_pull tool instead.
+func oversizeResult(uri, id, contentType string) *mcp.ReadResourceResult {
 	payload := map[string]any{
 		"id":          id,
 		"contentType": contentType,
-		"downloadUrl": downloadURL,
-		"note":        fmt.Sprintf("file exceeds the %d-byte inline cap; fetch it via downloadUrl", maxResourceBytes),
+		"note":        fmt.Sprintf("file exceeds the %d-byte inline cap; use the pushkit_pull tool with this id to download it", maxInlineResourceBytes),
 	}
 	data, _ := json.Marshal(payload)
 	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{

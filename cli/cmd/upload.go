@@ -107,7 +107,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	initResp, err := c.InitUpload(ctx, &apiclient.UploadInitRequest{
 		Filename:    filename,
 		ContentType: contentType,
-		SizeBytes:   size,
+		SizeBytes:   &size,
 		SHA256:      hashStr,
 	})
 	if err != nil {
@@ -145,7 +145,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 
 	completeReq := &apiclient.UploadCompleteRequest{
 		FileID:    initResp.FileID,
-		SizeBytes: size,
+		SizeBytes: &size,
 		SHA256:    hashStr,
 		Tags:      tags,
 	}

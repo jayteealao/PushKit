@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,31 +21,28 @@ import (
 // the file ID alone.
 const selfEchoWindow = 30 * time.Second
 
-// sseReconnectBase / sseReconnectMax bound the exponential reconnect backoff.
-// They are vars so tests can shrink them.
-var (
-	sseReconnectBase = 1 * time.Second
-	sseReconnectMax  = 60 * time.Second
-)
-
 // sseMaxLineBytes raises the bufio.Scanner token limit above its 64KB default so
 // a large data: line is not silently truncated.
 const sseMaxLineBytes = 1 << 20 // 1 MiB
 
-// sseHTTPClient holds the long-lived event stream open. It must NOT set an
-// absolute Timeout (that is a deadline from request start and would sever the
-// stream); cancellation is via context and dead peers are caught by TCP
-// keep-alive. ResponseHeaderTimeout gates only the initial response headers.
-var sseHTTPClient = &http.Client{
-	Timeout: 0,
-	Transport: &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-	},
+// newSSEClient constructs the http.Client used for the long-lived SSE stream.
+// It must NOT set an absolute Timeout (that is a deadline from request start and
+// would sever the stream); cancellation is via context and dead peers are caught
+// by TCP keep-alive. ResponseHeaderTimeout gates only the initial response headers.
+// TLS is floored at 1.2 as defense-in-depth.
+func newSSEClient() *http.Client {
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
 }
 
 // fileEvent is the JSON payload carried by a file.uploaded SSE frame.
@@ -58,9 +56,9 @@ type fileEvent struct {
 // are logged to stderr and retried, and it never affects tool calls. It returns
 // when ctx is cancelled.
 func (s *Server) runSubscriber(ctx context.Context) {
-	delay := sseReconnectBase
+	delay := s.reconnectBase
 	for {
-		err := s.subscribeOnce(ctx, func() { delay = sseReconnectBase })
+		err := s.subscribeOnce(ctx, func() { delay = s.reconnectBase })
 		if ctx.Err() != nil {
 			return
 		}
@@ -72,14 +70,18 @@ func (s *Server) runSubscriber(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
-		if delay *= 2; delay > sseReconnectMax {
-			delay = sseReconnectMax
+		if delay *= 2; delay > s.reconnectMax {
+			delay = s.reconnectMax
 		}
 	}
 }
 
 // jitter returns d scaled by a random factor in [0.5, 1.5) to spread reconnects.
+// If d is zero or negative, 0 is returned (guards against rand.Int64N(0) panic).
 func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
 	return d/2 + time.Duration(rand.Int64N(int64(d)))
 }
 
@@ -101,7 +103,7 @@ func (s *Server) subscribeOnce(ctx context.Context, onConnect func()) error {
 	req.Header.Set("X-API-Key", s.h.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := sseHTTPClient.Do(req)
+	resp, err := s.sseClient.Do(req)
 	if err != nil {
 		return err
 	}
