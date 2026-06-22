@@ -112,13 +112,14 @@ func TestReadResource_BinaryContent(t *testing.T) {
 }
 
 // TestReadResource_OverCapReturnsMetadata: a file past the inline cap returns
-// metadata + a download URL instead of bytes.
+// metadata (id, contentType, note) instead of bytes. The presigned S3 URL must
+// NOT appear in the result — it is a credential that must not reach LLM context.
 func TestReadResource_OverCapReturnsMetadata(t *testing.T) {
 	originURL := serveContent(t, "text/plain", []byte(strings.Repeat("A", 100)))
 
-	old := maxResourceBytes
-	maxResourceBytes = 8
-	t.Cleanup(func() { maxResourceBytes = old })
+	old := maxInlineResourceBytes
+	maxInlineResourceBytes = 8
+	t.Cleanup(func() { maxInlineResourceBytes = old })
 
 	s := newTestServer(t, &stubClient{
 		downloadFn: func(_ context.Context, _ string) (*client.DownloadResponse, error) {
@@ -133,8 +134,13 @@ func TestReadResource_OverCapReturnsMetadata(t *testing.T) {
 	if len(c.Blob) != 0 {
 		t.Errorf("expected no Blob for over-cap metadata, got %d bytes", len(c.Blob))
 	}
-	if !strings.Contains(c.Text, "downloadUrl") || !strings.Contains(c.Text, originURL) {
-		t.Errorf("metadata text missing downloadUrl: %q", c.Text)
+	// Must contain the file ID and a note directing the agent to use pushkit_pull.
+	if !strings.Contains(c.Text, `"id"`) || !strings.Contains(c.Text, "pushkit_pull") {
+		t.Errorf("metadata text missing id or pushkit_pull instruction: %q", c.Text)
+	}
+	// The presigned URL must NOT appear in the result (credential-in-response risk).
+	if strings.Contains(c.Text, originURL) {
+		t.Errorf("presigned URL must not appear in over-cap metadata result: %q", c.Text)
 	}
 }
 

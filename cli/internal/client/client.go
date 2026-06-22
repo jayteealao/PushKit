@@ -3,9 +3,11 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,16 +15,57 @@ import (
 )
 
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	baseURL    string
+	apiKey     string
+	http       *http.Client // authenticated backend API calls
+	httpUpload *http.Client // credential-free client for presigned S3 PUTs
+}
+
+// newUploadClient returns a dedicated http.Client for presigned S3 PUT requests.
+// It carries no auth headers, no API key logging, and has no absolute timeout
+// (uploads are bounded by per-request context deadlines instead). TLS is floored
+// at 1.2 as defense-in-depth.
+func newUploadClient() *http.Client {
+	return &http.Client{
+		Timeout: 0, // no absolute deadline; callers use per-request context timeouts
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
+}
+
+// newAPIClient returns the http.Client used for authenticated backend API calls.
+// No absolute Timeout is set: that is a deadline from request-start and would
+// kill CompleteUpload (which triggers a backend S3 HeadObject that can be slow).
+// Individual slow paths must be bounded by their caller's context deadline.
+// The Transport-level timeouts (dial, TLS, response-headers) still guard against
+// hung connections. TLS is floored at 1.2 as defense-in-depth.
+func newAPIClient() *http.Client {
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
 }
 
 func New(baseURL, apiKey string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 60 * time.Second},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		http:       newAPIClient(),
+		httpUpload: newUploadClient(),
 	}
 }
 
@@ -93,7 +136,9 @@ func (c *Client) Delete(ctx context.Context, fileID string) error {
 	return c.doJSON(req, nil)
 }
 
-// PutToPresignedURL uploads data to a presigned S3 URL.
+// PutToPresignedURL uploads data to a presigned S3 URL using a credential-free
+// http.Client — the presigned URL is self-authenticating and must not carry the
+// backend API key or any other auth header.
 func (c *Client) PutToPresignedURL(ctx context.Context, presignedURL string, body io.Reader, contentType string, size int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, presignedURL, body)
 	if err != nil {
@@ -102,7 +147,7 @@ func (c *Client) PutToPresignedURL(ctx context.Context, presignedURL string, bod
 	req.Header.Set("Content-Type", contentType)
 	req.ContentLength = size
 
-	resp, err := c.http.Do(req)
+	resp, err := c.httpUpload.Do(req)
 	if err != nil {
 		return fmt.Errorf("PUT to S3: %w", err)
 	}

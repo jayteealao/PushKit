@@ -15,8 +15,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -62,6 +64,12 @@ type Server struct {
 
 	mu         sync.Mutex
 	registered map[string]struct{} // file IDs currently exposed as concrete resources
+
+	// reconnect parameters for the SSE subscriber — per-instance so tests can
+	// override them without mutating package-level state (race-safe).
+	sseClient        *http.Client
+	reconnectBase    time.Duration
+	reconnectMax     time.Duration
 }
 
 // New constructs the pushkit MCP server with the four file tools registered. It
@@ -87,10 +95,13 @@ func New(opts Options) *Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "pushkit_delete", Description: deleteDescription}, h.delete)
 
 	srv := &Server{
-		mcp:        s,
-		h:          h,
-		baseURL:    opts.BaseURL,
-		registered: map[string]struct{}{},
+		mcp:           s,
+		h:             h,
+		baseURL:       opts.BaseURL,
+		registered:    map[string]struct{}{},
+		sseClient:     newSSEClient(),
+		reconnectBase: 1 * time.Second,
+		reconnectMax:  60 * time.Second,
 	}
 	// Register the resource template up front: it advertises the resources
 	// capability (with listChanged) from startup and resolves direct-URI reads for

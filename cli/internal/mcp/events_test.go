@@ -67,10 +67,14 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) {
 	t.Fatal("condition not met within deadline")
 }
 
-func swapBackoff(base, max time.Duration) func() {
-	ob, om := sseReconnectBase, sseReconnectMax
-	sseReconnectBase, sseReconnectMax = base, max
-	return func() { sseReconnectBase, sseReconnectMax = ob, om }
+// swapBackoff sets per-instance reconnect parameters on s and returns a restore
+// func. It is test-only and race-safe because the goroutine reads s.reconnectBase
+// / s.reconnectMax through the Server struct, and the caller sets them before
+// starting the goroutine.
+func swapBackoff(s *Server, base, max time.Duration) func() {
+	ob, om := s.reconnectBase, s.reconnectMax
+	s.reconnectBase, s.reconnectMax = base, max
+	return func() { s.reconnectBase, s.reconnectMax = ob, om }
 }
 
 func hasResourceURI(rs []*mcp.Resource, uri string) bool {
@@ -178,8 +182,6 @@ func TestDispatch_RefreshDeliversListChangedAndResource(t *testing.T) {
 // the subscriber reconnects, it reconciles by re-listing and picks up a file that
 // appeared while disconnected (no missed-event replay assumed).
 func TestSubscriber_ReconnectReconcilesNewFiles(t *testing.T) {
-	defer swapBackoff(5*time.Millisecond, 20*time.Millisecond)()
-
 	// SSE origin that accepts the connection then closes immediately, forcing a
 	// reconnect each time.
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +216,9 @@ func TestSubscriber_ReconnectReconcilesNewFiles(t *testing.T) {
 		State:    LoadState(t.TempDir(), origin.URL),
 		StateDir: t.TempDir(),
 	})
+	// Set fast reconnect on the instance before starting the goroutine — no global
+	// mutation, so parallel tests are hermetic and there is no data race.
+	defer swapBackoff(s, 5*time.Millisecond, 20*time.Millisecond)()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

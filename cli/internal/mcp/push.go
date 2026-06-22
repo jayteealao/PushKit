@@ -87,10 +87,11 @@ func (h *handlers) pushOne(ctx context.Context, path string) pushFileResult {
 	defer f.Close()
 
 	contentType := detectContentType(r.Filename)
+	sz := info.Size()
 	initResp, err := h.c.InitUpload(ctx, &client.UploadInitRequest{
 		Filename:    r.Filename,
 		ContentType: contentType,
-		SizeBytes:   info.Size(),
+		SizeBytes:   &sz,
 	})
 	if err != nil {
 		r.Error = fmt.Sprintf("init: %v", err)
@@ -111,7 +112,7 @@ func (h *handlers) pushOne(ctx context.Context, path string) pushFileResult {
 	}
 	if _, err := h.c.CompleteUpload(ctx, &client.UploadCompleteRequest{
 		FileID:    initResp.FileID,
-		SizeBytes: info.Size(),
+		SizeBytes: &sz,
 	}); err != nil {
 		r.Error = fmt.Sprintf("complete: %v", err)
 		h.cleanupOrphan(ctx, initResp.FileID)

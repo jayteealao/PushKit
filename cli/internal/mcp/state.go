@@ -10,6 +10,40 @@ import (
 	"time"
 )
 
+const stateLockFileName = "state.json.lock"
+
+// acquireStateLock takes an OS-level advisory lock on the state file by creating
+// a sentinel lockfile exclusively. It retries until the lock is acquired or the
+// deadline (5 s) is exceeded. Returns a release func.
+//
+// This guards concurrent CLI sessions on the same ~/.pushkit/state.json: without
+// it, two sessions racing on the read-modify-write-rename can silently drop each
+// other's updates (last rename wins). The lockfile approach is portable across
+// Linux, macOS, and Windows without any additional dependency.
+//
+// Limitation: the lock is advisory — a process that does not call acquireStateLock
+// (e.g. an external editor) is not blocked. This is acceptable for a
+// single-binary CLI; the assumption is that only pushkit CLI instances write this
+// file.
+func acquireStateLock(dir string) (release func(), err error) {
+	lockPath := filepath.Join(dir, stateLockFileName)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			return func() { os.Remove(lockPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("acquire state lock: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("acquire state lock: timed out waiting for %s", lockPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 const stateFileName = "state.json"
 
 // pushkitHome returns the ~/.pushkit directory used for the pulled-ID state file
@@ -116,11 +150,19 @@ func (s *State) WasRecentlyPushed(fileID string, window time.Duration) bool {
 }
 
 // persistLocked writes the merged state file atomically (temp + rename, 0600).
-// The caller must hold s.mu.
+// It acquires an OS-level advisory lockfile so concurrent CLI sessions do not
+// silently drop each other's updates (last-rename-wins race). The caller must
+// hold s.mu.
 func (s *State) persistLocked() error {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
+
+	release, err := acquireStateLock(s.dir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	// Re-read so we merge namespaces this State instance does not own.
 	disk := onDisk{Namespaces: map[string]*namespaceState{}}
@@ -157,6 +199,12 @@ func (s *State) persistLocked() error {
 		tmp.Close()
 		os.Remove(tmpName)
 		return fmt.Errorf("write temp state: %w", err)
+	}
+	// Sync before rename so the file is durable on power loss.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("sync temp state: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
