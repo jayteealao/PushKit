@@ -1,9 +1,12 @@
 package com.pushkit.app.data.upload
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -77,6 +80,16 @@ class UploadWorker(
     }
 
     private fun notifyResult(filename: String, success: Boolean) {
+        // POST_NOTIFICATIONS is runtime-revocable on API 33+; skip the terminal notification when it
+        // isn't granted (the foreground progress notification is exempt and still shows regardless).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                applicationContext,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         val notification = UploadNotifications.terminal(
             applicationContext,
             title = if (success) "Upload complete" else "Upload failed",
