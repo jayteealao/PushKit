@@ -179,11 +179,20 @@ jobs:
         working-directory: backend
 
       - name: Verify no unexpected DLL dependencies
+        # Denylist approach: the build uses -extldflags "-static" to link libgcc and
+        # libwinpthread statically. Any MinGW runtime DLL leaking into the import table
+        # means the static link failed. We fail on any match of known MinGW runtime DLL
+        # name patterns; Windows system DLLs (KERNEL32, bcryptprimitives, WS2_32, etc.)
+        # are legitimately imported by the Go runtime and are intentionally NOT denied.
         run: |
-          x86_64-w64-mingw32-objdump -p backend/pushkit-server.exe \
-            | grep "DLL Name:" \
-            | grep -Eiv "KERNEL32|ntdll|ADVAPI32|WS2_32|msvcrt|SHELL32|USER32|ole32" \
-            && { echo "Unexpected DLL dependency found"; exit 1; } || true
+          DLLS=$(x86_64-w64-mingw32-objdump -p backend/pushkit-server.exe | grep "DLL Name:")
+          echo "Imported DLLs:"
+          echo "$DLLS"
+          if echo "$DLLS" | grep -Ei "libgcc|libwinpthread|libstdc\+\+|libssp|libatomic|lib[a-z]+-[0-9]+\.dll"; then
+            echo "ERROR: MinGW runtime DLL dependency detected — static link (-extldflags \"-static\") did not eliminate all runtime DLLs."
+            exit 1
+          fi
+          echo "DLL gate passed: no MinGW runtime DLLs found."
 
       - name: Upload backend binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -294,14 +303,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install git-cliff
+        # CI-2: use a run: step so REF_NAME is passed via env, not interpolated into CLI
+        # args, preventing a crafted tag from injecting git-cliff flags.
+        run: |
+          curl -sSfL \
+            "https://github.com/orhun/git-cliff/releases/download/v2.8.0/git-cliff-2.8.0-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.8.0-x86_64-unknown-linux-gnu/git-cliff
+
       - name: Run git-cliff
-        # M-18: github.ref_name injected via env block.
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        # REF_NAME comes from env; never interpolated as a bare CLI argument.
         env:
           REF_NAME: ${{ github.ref_name }}
-        with:
-          config: cliff.toml
-          args: --unreleased --tag ${{ github.ref_name }} -o CHANGELOG-${{ github.ref_name }}.md
+        run: |
+          git-cliff --unreleased --tag "$REF_NAME" -o "CHANGELOG-${REF_NAME}.md"
 
       - name: Upload changelog artifact
         # M-18: github.ref_name in with: is not a run: block, no injection risk; kept as-is.
