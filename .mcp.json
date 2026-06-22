@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pushkit": {
+      "command": "pushkit",
+      "args": ["mcp"],
+      "env": {
+        "PUSHKIT_API_KEY": "${PUSHKIT_API_KEY}",
+        "PUSHKIT_API_URL": "${PUSHKIT_API_URL:-http://localhost:8080}"
+      }
+    }
+  }
+}

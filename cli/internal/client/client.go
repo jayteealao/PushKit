@@ -80,6 +80,19 @@ func (c *Client) GetDownloadURL(ctx context.Context, fileID string) (*DownloadRe
 	return &resp, nil
 }
 
+// Delete removes a file by ID via DELETE /v1/files/{fileID}. The backend
+// hard-deletes the row regardless of status (so an orphaned INITIATED upload can
+// be cleaned up) and best-effort removes the S3 object. A 204 No Content is
+// success; a non-2xx response is mapped to an error by doJSON.
+func (c *Client) Delete(ctx context.Context, fileID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v1/files/"+url.PathEscape(fileID), nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
+	return c.doJSON(req, nil)
+}
+
 // PutToPresignedURL uploads data to a presigned S3 URL.
 func (c *Client) PutToPresignedURL(ctx context.Context, presignedURL string, body io.Reader, contentType string, size int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, presignedURL, body)
