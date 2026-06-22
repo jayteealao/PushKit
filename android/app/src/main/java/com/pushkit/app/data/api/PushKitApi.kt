@@ -1,8 +1,16 @@
 package com.pushkit.app.data.api
 
 import com.pushkit.app.data.model.DownloadResponse
+import com.pushkit.app.data.model.FileItem
 import com.pushkit.app.data.model.FileListResponse
+import com.pushkit.app.data.model.UploadCompleteRequest
+import com.pushkit.app.data.model.UploadInitRequest
+import com.pushkit.app.data.model.UploadInitResponse
+import retrofit2.Response
+import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -21,4 +29,13 @@ interface PushKitApi {
     suspend fun getDownloadUrl(
         @Path("fileId") fileId: String
     ): DownloadResponse
+
+    @POST("v1/uploads/init")
+    suspend fun initUpload(@Body request: UploadInitRequest): UploadInitResponse
+
+    @POST("v1/uploads/complete")
+    suspend fun completeUpload(@Body request: UploadCompleteRequest): FileItem
+
+    @DELETE("v1/files/{fileId}")
+    suspend fun deleteFile(@Path("fileId") fileId: String): Response<Unit>
 }

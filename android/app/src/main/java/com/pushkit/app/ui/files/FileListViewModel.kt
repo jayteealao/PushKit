@@ -5,15 +5,31 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.WorkRequest
+import androidx.work.workDataOf
 import com.pushkit.app.data.FileRepository
+import com.pushkit.app.data.upload.UploadFileSource
+import com.pushkit.app.data.upload.UploadWorker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
 class FileListViewModel(
     private val repository: FileRepository,
@@ -77,6 +93,69 @@ class FileListViewModel(
                 .onFailure { error ->
                     _uiState.update { it.copy(error = "Download failed: ${error.message}") }
                 }
+        }
+    }
+
+    /**
+     * Copies the picked file into app cache (off the main thread), enqueues the foreground upload
+     * worker, then observes it to completion and refreshes the list so the new file appears.
+     */
+    fun enqueueUpload(uri: Uri, context: Context) {
+        val appContext = context.applicationContext
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isUploading = true, uploadMessage = "Preparing upload…", error = null)
+            }
+
+            val cached = withContext(Dispatchers.IO) {
+                UploadFileSource.copyToCache(appContext.contentResolver, uri, appContext.cacheDir)
+            }.getOrElse { err ->
+                _uiState.update {
+                    it.copy(
+                        isUploading = false,
+                        uploadMessage = null,
+                        error = "Upload failed: ${err.message ?: "could not read file"}"
+                    )
+                }
+                return@launch
+            }
+
+            val request = OneTimeWorkRequestBuilder<UploadWorker>()
+                .setConstraints(
+                    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+                )
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    WorkRequest.MIN_BACKOFF_MILLIS,
+                    TimeUnit.MILLISECONDS
+                )
+                .setInputData(
+                    workDataOf(
+                        UploadWorker.KEY_CACHE_PATH to cached.file.absolutePath,
+                        UploadWorker.KEY_FILENAME to cached.filename,
+                        UploadWorker.KEY_CONTENT_TYPE to cached.contentType,
+                        UploadWorker.KEY_SIZE to cached.sizeBytes
+                    )
+                )
+                .build()
+
+            val workManager = WorkManager.getInstance(appContext)
+            workManager.enqueue(request)
+            _uiState.update { it.copy(uploadMessage = "Uploading ${cached.filename}…") }
+
+            val finished = workManager.getWorkInfoByIdLiveData(request.id)
+                .asFlow()
+                .filterNotNull()
+                .first { it.state.isFinished }
+
+            if (finished.state == WorkInfo.State.SUCCEEDED) {
+                _uiState.update { it.copy(isUploading = false, uploadMessage = "Upload complete") }
+                loadFiles(refresh = true)
+            } else {
+                _uiState.update {
+                    it.copy(isUploading = false, uploadMessage = null, error = "Upload failed")
+                }
+            }
         }
     }
 

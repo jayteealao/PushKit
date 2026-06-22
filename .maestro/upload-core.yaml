@@ -1,0 +1,19 @@
+# Maestro flow for android-upload-core (acceptance criterion AC#7).
+# Drives the in-app upload entry point that Maestro can deterministically reach:
+#   launch -> tap the upload FAB -> the source chooser appears.
+# The out-of-app system file picker, the background WorkManager upload, and the system
+# notification are verified manually per the runbook in the slice's plan (Maestro cannot
+# deterministically drive the SAF picker or the notification shade).
+appId: com.pushkit.app
+name: Android upload core - FAB and source chooser
+---
+- launchApp
+- assertVisible: "PushKit"
+- tapOn: "Upload file"
+- assertVisible: "Upload a file"
+- assertVisible: "Upload a photo or video"
+# Manual continuation (see runbook):
+#   1. adb push a test file to the device/emulator.
+#   2. tapOn "Upload a file" and select it in the system picker.
+#   3. confirm the "Uploading" notification, then "Upload complete".
+#   4. confirm the file now appears in the PushKit list (and in `pushkit_list`).
