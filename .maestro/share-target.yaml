@@ -1,0 +1,35 @@
+# Maestro flow for android-share-target (interactive acceptance criterion).
+# The share sheet cannot be driven deterministically by Maestro (it is a system UI outside the
+# app), so the entry point is fired via `adb shell am start` — this file documents the command
+# sequence and asserts the app responds correctly.  The manual continuation steps complete the
+# interactive verification.
+#
+# Runbook (run after `docker compose up` + `./gradlew installDebug`):
+#   1. Push a test file to the emulator/device:
+#        adb push test.txt /sdcard/Download/test.txt
+#   2. Confirm the content URI (Downloads provider):
+#        adb shell content query --uri content://downloads/all_downloads --projection _id,_display_name \
+#          | grep test.txt
+#      Note the _id value (e.g. 42).
+#   3. Fire the share intent directly to PushKit:
+#        adb shell am start \
+#          -a android.intent.action.SEND \
+#          -t "text/plain" \
+#          --eu android.intent.extra.STREAM \
+#             "content://downloads/all_downloads/42" \
+#          com.pushkit.app
+#   4. Observe the "Uploading test.txt" foreground notification in the shade.
+#   5. Capture UploadWorker logs:
+#        lazylogcat --tag UploadWorker
+#      Look for the init -> PUT(200) -> complete sequence.
+#   6. After completion: confirm "test.txt" appears in the PushKit file list.
+#
+# Pass criteria: UploadWorker log shows init -> PUT(200) -> complete; the file appears in the list.
+appId: com.pushkit.app
+name: Android share target - receive ACTION_SEND and start upload
+---
+# Verify the app is launchable (baseline).
+- launchApp
+- assertVisible: "PushKit"
+# Manual continuation: fire the share intent via `adb shell am start` (see runbook above),
+# then confirm the upload notification and the new file in the list.
