@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -54,5 +58,31 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	)
 
 	srv := mcpserver.NewForClient(client.New(apiURL, apiKey), apiKey, apiURL, rootCmd.Version)
-	return srv.Run(cmd.Context(), &mcp.StdioTransport{})
+
+	// A stdio MCP server ends when the client closes the connection (stdin EOF)
+	// or the context is cancelled — both are normal shutdowns, not errors. Only a
+	// genuine transport/protocol failure should produce a non-zero exit.
+	if err := srv.Run(cmd.Context(), &mcp.StdioTransport{}); !isCleanShutdown(err) {
+		return err
+	}
+	return nil
+}
+
+// isCleanShutdown reports whether an error from the stdio server's Run is a
+// normal end-of-session (the client closed stdin, or the context was cancelled)
+// rather than a real failure. A clean disconnect surfaces as io.EOF/Canceled, or
+// — once a request has been processed — as the SDK's internal jsonrpc2
+// "server is closing" wire error, which lives in an internal package (no
+// exported sentinel) and does not Unwrap to io.EOF, so it is matched by message.
+func isCleanShutdown(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "server is closing") ||
+		strings.Contains(msg, "client is closing") ||
+		strings.HasSuffix(msg, "EOF")
 }

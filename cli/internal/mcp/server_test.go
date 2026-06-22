@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/pushkit/cli/internal/client"
 )
 
@@ -64,5 +66,52 @@ func TestUnreachableBackendIsToolError(t *testing.T) {
 	_, _, err := h.list(context.Background(), nil, listInput{})
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("expected a clear connection error, got %v", err)
+	}
+}
+
+// TestServerListsFourToolsOverSession drives a real MCP client against the server
+// over the SDK's in-memory transport: it performs the initialize handshake and
+// tools/list, asserting exactly the four file tools are advertised. This is the
+// deterministic runtime-truth evidence that the server registers and works (no
+// flaky stdio subprocess), and guards against a tool being dropped from wiring.
+func TestServerListsFourToolsOverSession(t *testing.T) {
+	srv := New(Options{
+		Client:   &stubClient{},
+		APIKey:   "k",
+		State:    LoadState(t.TempDir(), "http://localhost:8080"),
+		StateDir: t.TempDir(),
+	})
+	ctx := context.Background()
+
+	clientT, serverT := mcp.NewInMemoryTransports()
+	ss, err := srv.mcp.Connect(ctx, serverT, nil) // the server must connect first
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer ss.Close()
+
+	c := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := c.Connect(ctx, clientT, nil) // performs the initialize handshake
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+
+	got := map[string]bool{}
+	for _, tool := range res.Tools {
+		got[tool.Name] = true
+	}
+	for _, want := range []string{"pushkit_push", "pushkit_pull", "pushkit_list", "pushkit_delete"} {
+		if !got[want] {
+			t.Errorf("tool %q not advertised; got %v", want, got)
+		}
+	}
+	if len(res.Tools) != 4 {
+		t.Errorf("expected exactly 4 tools, got %d: %v", len(res.Tools), got)
 	}
 }
