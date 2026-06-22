@@ -142,7 +142,7 @@ func main() {
 		r.Use(auth.Middleware(cfg))
 		r.Mount("/v1/uploads", uploadHandler.Routes())
 		r.Mount("/v1/files", fileHandler.Routes())
-		r.Handle("/v1/events", &events.Handler{Hub: hub})
+		r.Handle("/v1/events", events.NewHandler(hub))
 	})
 
 	// M-11: Optional TLS. When TLS_CERT_FILE and TLS_KEY_FILE are both set,

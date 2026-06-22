@@ -14,14 +14,25 @@ import (
 // subscribes to the hub under the request's authenticated user_id and streams
 // that user's events until the client disconnects.
 type Handler struct {
-	Hub *Hub
+	pub Subscriber
+}
+
+// Subscriber is the seam the Handler depends on: it can subscribe a user_id and
+// receive events from the hub without depending on the concrete *Hub type.
+type Subscriber interface {
+	Subscribe(userID string) (<-chan Event, func())
+}
+
+// NewHandler constructs a Handler backed by the given Subscriber.
+func NewHandler(sub Subscriber) *Handler {
+	return &Handler{pub: sub}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	userID := auth.GetUserID(r.Context())
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	// Disable reverse-proxy response buffering (nginx and friends) so frames are
 	// delivered immediately rather than held until the buffer fills.
@@ -29,7 +40,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc := http.NewResponseController(w)
 
-	ch, unsub := h.Hub.Subscribe(userID)
+	ch, unsub := h.pub.Subscribe(userID)
 	defer unsub()
 
 	// Flush the headers immediately so the client sees an open stream before any
