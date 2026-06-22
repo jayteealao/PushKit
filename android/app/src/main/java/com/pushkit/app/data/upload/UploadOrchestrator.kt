@@ -23,12 +23,12 @@ import java.io.IOException
  * `asRequestBody`, which is repeatable (retry-safe) and reports an exact `Content-Length` (so the
  * request is not sent with `Transfer-Encoding: chunked`, which S3 presigned PUTs reject).
  */
-class UploadOrchestrator(
+open class UploadOrchestrator(
     private val repository: FileRepository,
     private val putClient: OkHttpClient
 ) {
 
-    suspend fun upload(cached: CachedUpload): Result<FileItem> {
+    open suspend fun upload(cached: CachedUpload): Result<FileItem> {
         val init = repository.initUpload(
             UploadInitRequest(
                 filename = cached.filename,

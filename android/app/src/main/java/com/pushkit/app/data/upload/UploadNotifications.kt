@@ -19,14 +19,12 @@ object UploadNotifications {
 
     fun createChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "File uploads",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Progress and results for background file uploads" }
-            manager.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "File uploads",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Progress and results for background file uploads" }
+        manager.createNotificationChannel(channel)
     }
 
     fun progress(context: Context, filename: String): Notification =

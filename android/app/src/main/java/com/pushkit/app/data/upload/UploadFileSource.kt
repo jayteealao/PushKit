@@ -24,13 +24,12 @@ data class CachedUpload(
  */
 object UploadFileSource {
 
-    private const val DEFAULT_CONTENT_TYPE = "application/octet-stream"
     private const val COPY_BUFFER_BYTES = 64 * 1024
 
     fun copyToCache(resolver: ContentResolver, uri: Uri, cacheDir: File): Result<CachedUpload> =
         runCatching {
             val displayName = queryDisplayName(resolver, uri) ?: fallbackName(uri)
-            val contentType = resolver.getType(uri) ?: DEFAULT_CONTENT_TYPE
+            val contentType = resolver.getType(uri) ?: UploadDefaults.CONTENT_TYPE
 
             val dir = File(cacheDir, "uploads").apply { mkdirs() }
             val dest = File.createTempFile("upload_", ".bin", dir)
@@ -66,5 +65,5 @@ object UploadFileSource {
         }
 
     private fun fallbackName(uri: Uri): String =
-        uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "upload.bin"
+        uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: UploadDefaults.FILENAME
 }
