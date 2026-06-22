@@ -117,4 +117,36 @@ class UploadOrchestratorTest {
         // complete must NOT have been called.
         assertEquals(3, server.requestCount)
     }
+
+    /**
+     * TST-3: init+PUT succeed but complete() returns an error.
+     *
+     * The orchestrator must:
+     *  1. Issue the best-effort orphan DELETE (the file exists in S3 but is INITIATED in the DB).
+     *  2. Return a failure result — the caller (UploadWorker) can decide whether to retry.
+     *
+     * Exactly 4 requests must be observed: init, PUT, complete, DELETE (orphan cleanup).
+     */
+    @Test
+    fun upload_completeFails_cleansUpOrphan_andReportsFailure() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"fileId":"f2","s3Key":"k2","presignedPutUrl":"${server.url("/put")}","expiresInSeconds":900,"requiredHeaders":{"Content-Type":"text/plain"}}"""
+            )
+        )
+        server.enqueue(MockResponse().setResponseCode(200)) // S3 PUT succeeds
+        server.enqueue(MockResponse().setResponseCode(500)) // complete() fails
+        server.enqueue(MockResponse().setResponseCode(204)) // DELETE orphan (best-effort)
+
+        val result = orchestrator.upload(cached())
+        assertFalse("complete() failure must propagate as a failure result", result.isSuccess)
+
+        assertEquals("/v1/uploads/init", server.takeRequest().path)
+        assertEquals("/put", server.takeRequest().path)
+        assertEquals("/v1/uploads/complete", server.takeRequest().path)
+        val delete = server.takeRequest()
+        assertEquals("DELETE", delete.method)
+        assertEquals("/v1/files/f2", delete.path)
+        assertEquals("complete+orphan-delete: exactly 4 requests expected", 4, server.requestCount)
+    }
 }

@@ -5,16 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
-import androidx.work.BackoffPolicy
-import androidx.work.Constraints
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.WorkRequest
-import androidx.work.workDataOf
 import com.pushkit.app.data.FileRepository
 import com.pushkit.app.data.upload.UploadFileSource
 import com.pushkit.app.data.upload.UploadWorker
@@ -29,7 +22,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
 
 class FileListViewModel(
     private val repository: FileRepository,
@@ -120,31 +112,13 @@ class FileListViewModel(
                 return@launch
             }
 
-            val request = OneTimeWorkRequestBuilder<UploadWorker>()
-                .setConstraints(
-                    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-                )
-                .setBackoffCriteria(
-                    BackoffPolicy.EXPONENTIAL,
-                    WorkRequest.MIN_BACKOFF_MILLIS,
-                    TimeUnit.MILLISECONDS
-                )
-                .setInputData(
-                    workDataOf(
-                        UploadWorker.KEY_CACHE_PATH to cached.file.absolutePath,
-                        UploadWorker.KEY_FILENAME to cached.filename,
-                        UploadWorker.KEY_CONTENT_TYPE to cached.contentType,
-                        UploadWorker.KEY_SIZE to cached.sizeBytes
-                    )
-                )
-                .build()
+            val request = UploadWorker.buildRequest(cached)
 
             val workManager = WorkManager.getInstance(appContext)
             workManager.enqueue(request)
             _uiState.update { it.copy(uploadMessage = "Uploading ${cached.filename}…") }
 
-            val finished = workManager.getWorkInfoByIdLiveData(request.id)
-                .asFlow()
+            val finished = workManager.getWorkInfoByIdFlow(request.id)
                 .filterNotNull()
                 .first { it.state.isFinished }
 
