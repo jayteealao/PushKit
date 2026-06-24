@@ -2,12 +2,14 @@
 
 [![Latest release](https://img.shields.io/github/v/release/jayteealao/PushKit?include_prereleases&sort=semver)](https://github.com/jayteealao/PushKit/releases/latest)
 
-Upload files from the CLI, download them on Android. All via pre-signed S3 URLs through a backend broker.
+Move files between a dev machine and an Android phone — upload from either side, download on either side — all via pre-signed S3 URLs through a backend broker. A Claude Code agent can push, pull, list, and `@`-mention your files through a built-in MCP server, and its view auto-refreshes the moment a new file lands.
 
-PushKit has three components, each with its own guide:
+PushKit has three components plus a Claude Code integration, each with its own guide:
 
 - **[CLI](cli/README.md)** — `pushkit` command-line client (published to PyPI).
 - **[Backend](backend/README.md)** — Go API server; how to run it locally and install the packaged Windows server.
+- **[Connect Claude Code](docs/connect-claude-code.md)** — register the MCP server so a Claude Code agent can share files with your phone.
+- **[MCP & events reference](docs/mcp-and-events-reference.md)** — the MCP tool/resource contract and the `GET /v1/events` stream.
 - **[Releasing](RELEASING.md)** — maintainer runbook for cutting a tagged release.
 
 Contributing? See **[CONTRIBUTING.md](CONTRIBUTING.md)** for commit conventions and the test gates.
@@ -61,7 +63,7 @@ The CLI has more commands and flags (tags, integrity checks, JSON output, pagina
 1. Open the `android/` project in Android Studio.
 2. Build and run on a device/emulator.
 3. In Settings, enter the API URL (e.g., `http://10.0.2.2:8000` for the emulator) and an API key.
-4. The file list shows uploaded files; tap to download.
+4. The file list shows uploaded files; tap to download. Tap the upload button to send a file from the phone — or share one into PushKit from another app — and it uploads in the background with a notification.
 
 App architecture and the build/version-override workflow are in [android/README.md](android/README.md).
 
@@ -76,6 +78,7 @@ All `/v1` endpoints require an `X-API-Key` header.
 | GET | `/v1/files` | List files (cursor pagination, search, sort) |
 | GET | `/v1/files/{fileId}/download` | Get presigned GET URL for download |
 | DELETE | `/v1/files/{fileId}` | Delete file |
+| GET | `/v1/events` | Subscribe to file events for the authenticated user (SSE) |
 | GET | `/health` | Health check (no auth) |
 
 ### Example: upload via curl
