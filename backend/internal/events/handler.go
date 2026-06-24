@@ -58,7 +58,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			// Client disconnected; the deferred unsub removes the subscriber.
 			return
-		case ev := <-ch:
+		case ev, ok := <-ch:
+			if !ok {
+				return // subscription closed
+			}
 			if !writeEvent(w, rc, ev) {
 				return // client gone
 			}
