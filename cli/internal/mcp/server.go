@@ -65,6 +65,10 @@ type Server struct {
 	mu         sync.Mutex
 	registered map[string]struct{} // file IDs currently exposed as concrete resources
 
+	// reconcileMu serializes whole reconcileResources runs so overlapping
+	// refreshes cannot race; distinct from mu, which guards only s.registered.
+	reconcileMu sync.Mutex
+
 	// reconnect parameters for the SSE subscriber — per-instance so tests can
 	// override them without mutating package-level state (race-safe).
 	sseClient        *http.Client

@@ -12,9 +12,19 @@ import (
 
 const stateLockFileName = "state.json.lock"
 
+// staleLockThreshold bounds how long a lockfile may sit before it is treated
+// as abandoned (left by a killed/crashed process). It is far above the
+// millisecond hold time of a normal state write, so a live lock is never
+// removed.
+const staleLockThreshold = 30 * time.Second
+
 // acquireStateLock takes an OS-level advisory lock on the state file by creating
 // a sentinel lockfile exclusively. It retries until the lock is acquired or the
 // deadline (5 s) is exceeded. Returns a release func.
+//
+// Stale-lock recovery: if the lockfile already exists but its mtime is older
+// than staleLockThreshold, it is treated as abandoned (left by a killed or
+// crashed process) and removed so the current run can proceed immediately.
 //
 // This guards concurrent CLI sessions on the same ~/.pushkit/state.json: without
 // it, two sessions racing on the read-modify-write-rename can silently drop each
@@ -36,6 +46,10 @@ func acquireStateLock(dir string) (release func(), err error) {
 		}
 		if !os.IsExist(err) {
 			return nil, fmt.Errorf("acquire state lock: %w", err)
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > staleLockThreshold {
+			_ = os.Remove(lockPath) // reclaim a lock abandoned by a dead process
+			continue
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("acquire state lock: timed out waiting for %s", lockPath)
