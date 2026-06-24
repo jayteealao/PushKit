@@ -78,6 +78,34 @@ func TestStateFileContentsAndPerms(t *testing.T) {
 	}
 }
 
+func TestAcquireStateLock_RecoversStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, stateLockFileName)
+
+	// Write a lockfile and backdate its mtime to simulate an abandoned lock.
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatalf("create stale lockfile: %v", err)
+	}
+	oldTime := time.Now().Add(-1 * time.Minute)
+	if err := os.Chtimes(lockPath, oldTime, oldTime); err != nil {
+		t.Fatalf("backdate lockfile mtime: %v", err)
+	}
+
+	release, err := acquireStateLock(dir)
+	if err != nil {
+		t.Fatalf("acquireStateLock should recover a stale lock, got: %v", err)
+	}
+	if release == nil {
+		t.Fatal("acquireStateLock returned nil release func")
+	}
+	release()
+
+	// After release the lockfile must be gone.
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lockfile should be removed after release")
+	}
+}
+
 func TestStatePushedWindow(t *testing.T) {
 	s := LoadState(t.TempDir(), "http://localhost:8080")
 	s.RecordPushed("just-pushed")

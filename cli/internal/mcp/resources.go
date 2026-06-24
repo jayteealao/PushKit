@@ -117,6 +117,11 @@ func resourceDescription(f client.FileResponse) string {
 // refresh primitive — run on (re)connect and on each non-echo file.uploaded — and
 // it needs no missed-event replay because it always reflects the current list.
 //
+// s.reconcileMu serializes concurrent reconcile runs: if a future caller triggers
+// a second reconcile while one is already in flight, they execute sequentially
+// rather than racing. The listAll network call is intentionally outside s.mu;
+// s.mu is held only around the s.registered mutations below.
+//
 // Lock ordering: s.mu is held across the SDK AddResource / RemoveResources calls.
 // This is safe because the SDK resource-read callbacks (readFileResource) call
 // only s.h.* methods (client I/O) and never re-enter s.mu. No SDK callback
@@ -124,6 +129,9 @@ func resourceDescription(f client.FileResponse) string {
 // needs s.mu, narrow this critical section to guard only s.registered mutations
 // and perform the SDK calls outside the lock using a diff snapshot.
 func (s *Server) reconcileResources(ctx context.Context) error {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
 	files, err := s.h.listAll(ctx)
 	if err != nil {
 		return err
