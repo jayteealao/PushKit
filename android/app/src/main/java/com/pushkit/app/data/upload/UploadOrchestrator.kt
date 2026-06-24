@@ -41,11 +41,14 @@ open class UploadOrchestrator(
         // Replay it verbatim; fall back to what we sent only if the map is empty.
         val signedContentType = init.requiredHeaders["Content-Type"] ?: cached.contentType
 
-        val putResult = runCatching { putObject(init.presignedPutUrl, cached, signedContentType) }
-        if (putResult.isFailure) {
+        try {
+            putObject(init.presignedPutUrl, cached, signedContentType)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
             // Best-effort cleanup of the INITIATED orphan; ignore the cleanup result.
             repository.deleteFile(init.fileId)
-            return Result.failure(putResult.exceptionOrNull() ?: IOException("upload PUT failed"))
+            return Result.failure(e)
         }
 
         return repository.completeUpload(
