@@ -68,9 +68,10 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) {
 }
 
 // swapBackoff sets per-instance reconnect parameters on s and returns a restore
-// func. It is test-only and race-safe because the goroutine reads s.reconnectBase
-// / s.reconnectMax through the Server struct, and the caller sets them before
-// starting the goroutine.
+// func. The restore writes s.reconnectBase/Max, which the subscriber goroutine
+// reads, so a caller that starts runSubscriber must stop and JOIN that goroutine
+// before the deferred restore runs (see TestSubscriber_ReconnectReconcilesNewFiles);
+// otherwise the restore races the goroutine's reads at teardown.
 func swapBackoff(s *Server, base, max time.Duration) func() {
 	ob, om := s.reconnectBase, s.reconnectMax
 	s.reconnectBase, s.reconnectMax = base, max
@@ -222,12 +223,19 @@ func TestSubscriber_ReconnectReconcilesNewFiles(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go s.runSubscriber(ctx)
+	done := make(chan struct{})
+	go func() { s.runSubscriber(ctx); close(done) }()
 
 	waitFor(t, 2*time.Second, func() bool { return s.isRegistered("b") })
 	if !s.isRegistered("a") {
 		t.Error("file a should remain registered across reconnects")
 	}
+
+	// Stop the subscriber and wait for it to return before the test does: the
+	// deferred swapBackoff restore writes s.reconnectBase/Max, which the goroutine
+	// reads — joining here removes that teardown race (and the goroutine leak).
+	cancel()
+	<-done
 }
 
 // TestSubscriber_StopsOnContextCancel is the leak gate: the subscriber goroutine
