@@ -307,9 +307,10 @@ jobs:
         # CI-2: use a run: step so REF_NAME is passed via env, not interpolated into CLI
         # args, preventing a crafted tag from injecting git-cliff flags.
         run: |
+          set -euo pipefail
           curl -sSfL \
             "https://github.com/orhun/git-cliff/releases/download/v2.8.0/git-cliff-2.8.0-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.8.0-x86_64-unknown-linux-gnu/git-cliff
+            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.8.0/git-cliff
 
       - name: Run git-cliff
         # REF_NAME comes from env; never interpolated as a bare CLI argument.
